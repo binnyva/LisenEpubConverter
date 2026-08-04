@@ -1,0 +1,38 @@
+{
+  "name": "lisen-epub-convertor",
+  "version": "0.1.0",
+  "description": "Converts an EPUB into a multi-voice M4B audiobook",
+  "type": "module",
+  "bin": {
+    "lisen": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/cli.ts",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "author": "Binny V A",
+  "license": "ISC",
+  "dependencies": {
+    "adm-zip": "^0.6.0",
+    "cheerio": "^1.2.0",
+    "commander": "^15.0.0",
+    "fast-xml-parser": "^5.10.1",
+    "openai": "^7.4.0",
+    "p-limit": "^7.3.1",
+    "turndown": "^7.2.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.8",
+    "@types/node": "^26.1.2",
+    "@types/turndown": "^5.0.6",
+    "tsx": "^4.23.5",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
