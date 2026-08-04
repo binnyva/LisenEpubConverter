@@ -4,3 +4,4 @@ work/
 *.m4b
 .env
 0Meta/
+.DS_Store
