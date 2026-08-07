@@ -6,7 +6,7 @@ import { markdownToSpeakable } from '../epub/markdown.js';
 import { splitSentences } from '../util/text.js';
 import { config } from '../config.js';
 import type { WorkDir } from '../state.js';
-import type { Casting, ChapterAudioManifest, ChapterScript } from '../types.js';
+import type { BookMetadata, Casting, ChapterAudioManifest, ChapterScript } from '../types.js';
 
 /**
  * Stage 6: synthesize every script segment to MP3. Each unique
@@ -15,7 +15,18 @@ import type { Casting, ChapterAudioManifest, ChapterScript } from '../types.js';
  */
 export async function runSynth(work: WorkDir): Promise<void> {
   const casting = work.readJson<Casting>('casting.json');
+  const meta = work.readJson<BookMetadata>('metadata.json');
   const provider = getTTSProvider();
+
+  // Casting instructions that mention a nationality or accent ("Portuguese-
+  // accented narration") can make the TTS model switch into that language and
+  // translate the segment outright, especially when the text opens with foreign
+  // proper nouns. Pin the spoken language explicitly on every request. The
+  // guard is applied at request time but excluded from the cache hash, so
+  // adding or rewording it never invalidates already-synthesized audio.
+  const languageName =
+    new Intl.DisplayNames(['en'], { type: 'language' }).of(meta.language) ?? meta.language;
+  const languageGuard = `Speak in ${languageName}, reading the text verbatim; never translate it into another language. Any accent described below affects pronunciation only.`;
   const cacheDir = work.dir('audio-cache');
   work.dir('audio');
 
@@ -60,7 +71,7 @@ export async function runSynth(work: WorkDir): Promise<void> {
             cached++;
             return;
           }
-          const audio = await synthesizeWithRetry(provider, piece);
+          const audio = await synthesizeWithRetry(provider, piece, languageGuard);
           fs.writeFileSync(out + '.tmp', audio);
           fs.renameSync(out + '.tmp', out);
         })
@@ -80,7 +91,8 @@ export async function runSynth(work: WorkDir): Promise<void> {
 
 async function synthesizeWithRetry(
   provider: ReturnType<typeof getTTSProvider>,
-  piece: { text: string; voiceId: string; instructions: string }
+  piece: { text: string; voiceId: string; instructions: string },
+  languageGuard: string
 ): Promise<Buffer> {
   let lastErr: unknown;
   for (let attempt = 1; attempt <= 4; attempt++) {
@@ -88,7 +100,7 @@ async function synthesizeWithRetry(
       return await provider.synthesize({
         text: piece.text,
         voiceId: piece.voiceId,
-        instructions: piece.instructions || undefined,
+        instructions: [languageGuard, piece.instructions].filter(Boolean).join(' '),
       });
     } catch (err) {
       lastErr = err;
