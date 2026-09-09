@@ -28,13 +28,14 @@ function escapeMeta(s: string): string {
  * Stage 7: concatenate cached segments into per-chapter M4A files, then all
  * chapters into a single M4B with chapter markers, tags and cover art.
  */
-export function runAssemble(work: WorkDir, outDir: string): string {
+export function runAssemble(work: WorkDir, outDir: string, chapterIndexes?: number[]): string {
   const meta = work.readJson<BookMetadata>('metadata.json');
   work.dir('audio');
 
   const manifests = fs
     .readdirSync(work.path('audio'))
     .filter((f) => f.endsWith('-segments.json'))
+    .filter((f) => !chapterIndexes || chapterIndexes.includes(Number.parseInt(f, 10)))
     .sort()
     .map((f) => work.readJson<ChapterAudioManifest>(`audio/${f}`));
   if (manifests.length === 0) throw new Error('No synthesized chapters found — run synth first.');
@@ -90,7 +91,10 @@ export function runAssemble(work: WorkDir, outDir: string): string {
   // 4. Mux metadata + cover into the final .m4b.
   fs.mkdirSync(outDir, { recursive: true });
   const safeTitle = meta.title.replace(/[\\/:*?"<>|]/g, '-').trim() || 'book';
-  const outFile = path.resolve(outDir, `${safeTitle}.m4b`);
+  const selectionLabel = chapterIndexes?.length
+    ? ` - chapters ${[...chapterIndexes].sort((a, b) => a - b).join('-')}`
+    : '';
+  const outFile = path.resolve(outDir, `${safeTitle}${selectionLabel}.m4b`);
 
   const args = ['-i', bookM4a, '-i', ffmetaFile];
   if (meta.coverFile && fs.existsSync(work.path(meta.coverFile))) {

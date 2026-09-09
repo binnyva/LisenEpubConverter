@@ -15,6 +15,7 @@ npm install
 npm run dev -- convert book.epub                # full pipeline
 npm run dev -- convert book.epub --dry-run      # everything except TTS spend
 npm run dev -- status book.epub                 # stage completion
+npm run dev -- ui                               # local web workspace
 ```
 
 Options for `convert`:
@@ -42,6 +43,24 @@ EPUB → extract → analyze → chapters → script → casting → synth → a
 7. **assemble** — ffmpeg concat into per-chapter M4As, then a single `.m4b` with chapter markers, tags, and cover art.
 
 Every stage records completion in `work/<book>/state.json`; re-running resumes where it left off. Stages 3, 4, and 6 also resume mid-stage (per chapter / per segment). If the EPUB file itself changes, the stage state is cleared automatically.
+
+### Local workspace and individual stages
+
+Run `npm run dev -- ui` and open the displayed localhost address to review existing work folders, inspect pipeline artifacts, edit voice casting, and run pipeline stages one at a time. EPUBs remain at their original paths; a missing source EPUB can still be inspected but must be relinked before work can resume.
+
+The CLI offers the same manual control:
+
+```bash
+npm run dev -- books --json
+npm run dev -- status book.epub --json
+npm run dev -- run book.epub script --chapters 3,4
+npm run dev -- run book.epub synth --chapters 3,4
+npm run dev -- run book.epub assemble --chapters 3,4 --out output
+npm run dev -- run book.epub script --chapters 3 --rerun
+npm run dev -- run book.epub script --rebuild  # rebuild this and derived output
+```
+
+`chapters`, `script`, `synth`, and `assemble` accept `--chapters` using zero-based EPUB chapter indexes. A chapter selection resumes only those chapters. Use `--rerun` to execute a completed stage again; `--rebuild` always rebuilds the full stage and its downstream artifacts, while preserving the TTS audio cache.
 
 ### Work directory
 

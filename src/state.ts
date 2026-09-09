@@ -3,10 +3,14 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { STAGES, type Stage } from './config.js';
 
-interface StateFile {
+export interface WorkState {
   epub: string;
   epubHash: string;
   completed: Partial<Record<Stage, string>>; // stage -> ISO timestamp
+  /** The EPUB currently selected differs from the source that produced the completed stages. */
+  sourceChanged?: boolean;
+  /** Completion timestamps for stages that can be run a chapter at a time. */
+  chapterCompleted?: Partial<Record<'chapters' | 'script' | 'synth', Record<string, string>>>;
 }
 
 /**
@@ -15,7 +19,8 @@ interface StateFile {
  */
 export class WorkDir {
   readonly root: string;
-  private state: StateFile;
+  private state: WorkState;
+  private readonly currentEpubHash: string;
 
   constructor(epubPath: string, workRoot: string) {
     const slug = path
@@ -27,7 +32,7 @@ export class WorkDir {
     this.root = path.resolve(workRoot, slug);
     fs.mkdirSync(this.root, { recursive: true });
 
-    const epubHash = crypto
+    this.currentEpubHash = crypto
       .createHash('sha256')
       .update(fs.readFileSync(epubPath))
       .digest('hex')
@@ -36,13 +41,18 @@ export class WorkDir {
     const statePath = this.path('state.json');
     if (fs.existsSync(statePath)) {
       this.state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-      if (this.state.epubHash !== epubHash) {
-        console.warn('EPUB file changed since last run — clearing stage state.');
-        this.state = { epub: epubPath, epubHash, completed: {} };
+      if (this.state.epubHash !== this.currentEpubHash) {
+        console.warn('EPUB file changed since last run — rebuild Extract before using the existing pipeline output.');
+        this.state.epub = epubPath;
+        this.state.sourceChanged = true;
+        this.save();
+      } else if (this.state.epub !== epubPath || this.state.sourceChanged) {
+        this.state.epub = epubPath;
+        delete this.state.sourceChanged;
         this.save();
       }
     } else {
-      this.state = { epub: epubPath, epubHash, completed: {} };
+      this.state = { epub: epubPath, epubHash: this.currentEpubHash, completed: {}, chapterCompleted: {} };
       this.save();
     }
   }
@@ -66,10 +76,51 @@ export class WorkDir {
     this.save();
   }
 
+  sourceChanged(): boolean {
+    return this.state.sourceChanged === true;
+  }
+
+  /** Accept the currently selected EPUB after an explicit Extract rebuild. */
+  acceptCurrentEpub(): void {
+    this.state.epubHash = this.currentEpubHash;
+    delete this.state.sourceChanged;
+    this.save();
+  }
+
+  completedChapters(stage: 'chapters' | 'script' | 'synth'): number[] {
+    return Object.keys(this.state.chapterCompleted?.[stage] ?? {})
+      .map(Number)
+      .filter(Number.isInteger)
+      .sort((a, b) => a - b);
+  }
+
+  markChaptersDone(
+    stage: 'chapters' | 'script' | 'synth',
+    indexes: number[],
+    allIndexes: number[]
+  ): void {
+    const timestamp = new Date().toISOString();
+    const completed = (this.state.chapterCompleted ??= {});
+    const byChapter = (completed[stage] ??= {});
+    for (const index of indexes) byChapter[String(index)] = timestamp;
+
+    if (allIndexes.length > 0 && allIndexes.every((index) => byChapter[String(index)])) {
+      this.state.completed[stage] = timestamp;
+    } else {
+      delete this.state.completed[stage];
+    }
+    this.save();
+  }
+
   /** Clear completion for `stage` and everything after it. */
   invalidateFrom(stage: Stage): void {
     const start = STAGES.indexOf(stage);
-    for (const s of STAGES.slice(start)) delete this.state.completed[s];
+    for (const s of STAGES.slice(start)) {
+      delete this.state.completed[s];
+      if (s === 'chapters' || s === 'script' || s === 'synth') {
+        delete this.state.chapterCompleted?.[s];
+      }
+    }
     this.save();
   }
 
@@ -79,6 +130,10 @@ export class WorkDir {
       done: this.isDone(stage),
       at: this.state.completed[stage],
     }));
+  }
+
+  snapshot(): WorkState {
+    return structuredClone(this.state);
   }
 
   readJson<T>(rel: string): T {

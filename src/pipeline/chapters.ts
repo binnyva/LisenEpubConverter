@@ -19,7 +19,7 @@ const SUMMARIES_FILE = 'chapter-summaries.json';
  * each one gets the previous summaries as rolling context; already-processed
  * chapters are skipped on re-runs.
  */
-export async function runChapters(work: WorkDir): Promise<void> {
+export async function runChapters(work: WorkDir, chapterIndexes?: number[]): Promise<void> {
   const meta = work.readJson<BookMetadata>('metadata.json');
   const analysis = work.readJson<Analysis>('analysis.json');
   work.dir('chapters-clean');
@@ -28,9 +28,9 @@ export async function runChapters(work: WorkDir): Promise<void> {
     ? work.readJson<ChapterSummaries>(SUMMARIES_FILE)
     : {};
 
-  const narratable = meta.chapters.filter(
-    (ch) => analysis.chapters.find((p) => p.index === ch.index)?.narrate
-  );
+  const narratable = meta.chapters
+    .filter((ch) => analysis.chapters.find((p) => p.index === ch.index)?.narrate)
+    .filter((ch) => !chapterIndexes || chapterIndexes.includes(ch.index));
 
   for (const ch of narratable) {
     const cleanFile = `chapters-clean/${String(ch.index).padStart(2, '0')}.md`;

@@ -13,7 +13,7 @@ import type { BookMetadata, Casting, ChapterAudioManifest, ChapterScript } from 
  * (text, voice, instructions) is cached by content hash, so re-runs and
  * crashes never pay for the same audio twice.
  */
-export async function runSynth(work: WorkDir): Promise<void> {
+export async function runSynth(work: WorkDir, chapterIndexes?: number[]): Promise<void> {
   const casting = work.readJson<Casting>('casting.json');
   const meta = work.readJson<BookMetadata>('metadata.json');
   const provider = getTTSProvider();
@@ -31,7 +31,10 @@ export async function runSynth(work: WorkDir): Promise<void> {
   work.dir('audio');
 
   const limit = pLimit(config.ttsConcurrency);
-  const scriptFiles = fs.readdirSync(work.path('script')).sort();
+  const scriptFiles = fs
+    .readdirSync(work.path('script'))
+    .filter((file) => !chapterIndexes || chapterIndexes.includes(Number.parseInt(file, 10)))
+    .sort();
 
   let total = 0;
   let cached = 0;

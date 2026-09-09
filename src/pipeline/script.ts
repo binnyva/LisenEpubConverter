@@ -34,15 +34,15 @@ export function filterNarratableSegments(segments: ScriptSegment[]): ScriptSegme
  * attribution plus a verification pass on low-confidence segments;
  * non-fiction is entirely the narrator.
  */
-export async function runScript(work: WorkDir): Promise<void> {
+export async function runScript(work: WorkDir, chapterIndexes?: number[]): Promise<void> {
   const meta = work.readJson<BookMetadata>('metadata.json');
   const analysis = work.readJson<Analysis>('analysis.json');
   const summaries = work.readJson<ChapterSummaries>('chapter-summaries.json');
   work.dir('script');
 
-  const narratable = meta.chapters.filter(
-    (ch) => analysis.chapters.find((p) => p.index === ch.index)?.narrate
-  );
+  const narratable = meta.chapters
+    .filter((ch) => analysis.chapters.find((p) => p.index === ch.index)?.narrate)
+    .filter((ch) => !chapterIndexes || chapterIndexes.includes(ch.index));
 
   // Canonical-name lookup, including aliases, case-insensitive.
   const canonical = new Map<string, string>();
