@@ -6,7 +6,7 @@ Backend CLI for [lisentome.com](https://lisentome.com/): converts an EPUB into a
 
 - Node 20+
 - ffmpeg + ffprobe on PATH (`brew install ffmpeg`)
-- `OPENAI_API_KEY` environment variable (a `.env` file in the project root is loaded automatically)
+- An API key for each configured provider: `OPENAI_API_KEY` and/or `OPENROUTER_API_KEY` (a `.env` file in the project root is loaded automatically)
 
 ## Usage
 
@@ -37,7 +37,7 @@ EPUB → extract → analyze → chapters → script → casting → synth → a
 2. **analyze** — LLM pass: fiction detection, book summary, character/author profiles, and a narrate/skip decision per chapter (ToC, acknowledgments, license pages etc. are skipped).
 3. **chapters** — per-chapter summary + minimal audio-friendly cleanup (`chapters-clean/`).
 4. **script** — dialogue attribution into `{speaker, text, delivery}` segments (`script/`), with a verification pass on low-confidence lines. Non-fiction is all narrator.
-5. **casting** — voice per speaker (`casting.json`). The most talkative characters get distinct OpenAI voices; minor ones share voices differentiated by delivery instructions. **Hand-edit this file before synthesis if you want different voices.**
+5. **casting** — voice per speaker (`casting.json`). The most talkative characters get distinct voices; minor ones share voices differentiated by delivery instructions. **Hand-edit this file before synthesis if you want different voices.**
 6. **synth** — TTS per segment, cached by content hash in `audio-cache/` — crashes and re-runs never pay for the same audio twice.
 7. **assemble** — ffmpeg concat into per-chapter M4As, then a single `.m4b` with chapter markers, tags, and cover art.
 
@@ -70,11 +70,40 @@ Environment variables (see `src/config.ts` for defaults):
 - `LISEN_ANALYSIS_MODEL` — model for whole-book analysis (default `gpt-4.1`)
 - `LISEN_CHAPTER_MODEL` — model for per-chapter work (default `gpt-4.1-mini`)
 - `LISEN_TTS_MODEL` — TTS model (default `gpt-4o-mini-tts`)
-- `LISEN_TTS_PROVIDER` — TTS provider id (default `openai`)
+- `LISEN_LLM_PROVIDER` — text-processing provider: `openai` or `openrouter` (default `openai`)
+- `LISEN_TTS_PROVIDER` — TTS provider: `openai` or `openrouter` (default `openai`)
+- `LISEN_OPENROUTER_BASE_URL` — OpenRouter API base URL (default `https://openrouter.ai/api/v1`)
+- `LISEN_OPENROUTER_SITE_URL` — optional application URL sent to OpenRouter for attribution
+- `LISEN_TTS_MAX_CHARS` — maximum characters in one TTS request (default `4000`)
+- `LISEN_TTS_VOICES_FILE` — JSON catalogue of voices for a non-OpenAI OpenRouter speech model
 
 Other tunables (concurrency, chunk sizes, voice slots, bitrate) are constants in `src/config.ts`.
 
-To add a TTS provider, implement `TTSProvider` (`src/providers/tts/types.ts`) and register it in `getTTSProvider()` (`src/providers/tts/openai.ts`).
+### OpenRouter
+
+OpenRouter can be used for text processing, speech synthesis, or both. Its text models must support JSON-mode responses because every LLM stage validates structured JSON. Use OpenRouter model slugs for all model variables, for example:
+
+```env
+OPENROUTER_API_KEY=sk-or-...
+LISEN_LLM_PROVIDER=openrouter
+LISEN_ANALYSIS_MODEL=anthropic/claude-sonnet-4
+LISEN_CHAPTER_MODEL=google/gemini-2.5-flash
+LISEN_TTS_PROVIDER=openrouter
+LISEN_TTS_MODEL=openai/gpt-4o-mini-tts-2025-12-15
+```
+
+OpenRouter's OpenAI speech models use Lisen's built-in OpenAI voice catalogue. Other speech models have model-specific voice IDs, so create a catalogue such as `voices.json` and point `LISEN_TTS_VOICES_FILE` at it:
+
+```json
+[
+  { "id": "voice-a", "sex": "female", "description": "warm adult female" },
+  { "id": "voice-b", "sex": "male", "description": "calm adult male" }
+]
+```
+
+The catalogue must be a non-empty array with unique IDs. Consult the selected OpenRouter model's documentation for valid voice IDs and its text-length limit; set `LISEN_TTS_MAX_CHARS` when that limit is below 4000. For OpenAI speech models routed through OpenRouter, Lisen forwards narration and delivery instructions. Other models receive the standard text-and-voice request only, since style controls are provider-specific.
+
+To add a direct TTS provider, implement `TTSProvider` (`src/providers/tts/types.ts`) and register it in `getTTSProvider()` (`src/providers/tts/openai.ts`).
 
 ## Development
 

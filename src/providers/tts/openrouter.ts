@@ -1,0 +1,52 @@
+import { config } from '../../config.js';
+import type { SynthesisRequest, TTSProvider, Voice } from './types.js';
+import { loadVoiceCatalog, OPENAI_VOICES } from './voices.js';
+
+/** TTS implementation for OpenRouter's OpenAI-compatible audio/speech endpoint. */
+export class OpenRouterTTSProvider implements TTSProvider {
+  readonly id = 'openrouter';
+  readonly maxChars = config.ttsMaxChars;
+  private readonly voices: Voice[];
+
+  constructor() {
+    if (config.ttsVoicesFile) {
+      this.voices = loadVoiceCatalog(config.ttsVoicesFile);
+    } else if (config.ttsModel.startsWith('openai/')) {
+      this.voices = OPENAI_VOICES;
+    } else {
+      throw new Error(
+        `OpenRouter TTS model "${config.ttsModel}" has no built-in voice catalogue. Set LISEN_TTS_VOICES_FILE to a JSON file describing its supported voices.`
+      );
+    }
+  }
+
+  listVoices(): Voice[] {
+    return this.voices;
+  }
+
+  async synthesize(req: SynthesisRequest): Promise<Buffer> {
+    const usesOpenAIOptions = config.ttsModel.startsWith('openai/');
+    const res = await fetch(`${config.openRouterBaseUrl}/audio/speech`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${process.env.OPENROUTER_API_KEY ?? ''}`,
+        'Content-Type': 'application/json',
+        'X-OpenRouter-Title': 'Lisen EPUB Convertor',
+        ...(config.openRouterSiteUrl ? { 'HTTP-Referer': config.openRouterSiteUrl } : {}),
+      },
+      body: JSON.stringify({
+        model: config.ttsModel,
+        input: req.text,
+        voice: req.voiceId,
+        response_format: 'mp3',
+        ...(usesOpenAIOptions && req.instructions
+          ? { provider: { options: { openai: { instructions: req.instructions } } } }
+          : {}),
+      }),
+    });
+    if (!res.ok) {
+      throw new Error(`OpenRouter TTS request failed (${res.status}): ${(await res.text()).slice(0, 1000)}`);
+    }
+    return Buffer.from(await res.arrayBuffer());
+  }
+}

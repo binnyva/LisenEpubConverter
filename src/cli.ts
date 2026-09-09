@@ -16,7 +16,7 @@ for (const envFile of [
 }
 import { STAGES, type Stage } from './config.js';
 import { WorkDir } from './state.js';
-import { checkApiKey, checkFfmpeg } from './checks.js';
+import { checkApiKeys, checkFfmpeg } from './checks.js';
 import { runExtract } from './pipeline/extract.js';
 import { runAnalyze } from './pipeline/analyze.js';
 import { runChapters } from './pipeline/chapters.js';
@@ -44,7 +44,7 @@ program
       process.exit(1);
     }
     checkFfmpeg();
-    checkApiKey();
+    checkApiKeys();
 
     const work = new WorkDir(epub, opts.work);
     console.log(`Work directory: ${work.root}`);
