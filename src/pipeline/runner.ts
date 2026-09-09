@@ -12,11 +12,12 @@ import { runScript } from './script.js';
 import { runSynth } from './synth.js';
 import { runVoices } from './voices.js';
 import type { VoiceTarget } from '../voices/library.js';
+import { withWarningReporter } from '../util/warnings.js';
 
 export type ChapterStage = 'chapters' | 'script' | 'synth';
 
 export interface PipelineEvent {
-  type: 'started' | 'completed' | 'skipped';
+  type: 'started' | 'completed' | 'skipped' | 'warning';
   stage: Stage;
   message: string;
 }
@@ -54,6 +55,13 @@ const CHAPTER_STAGES = new Set<Stage>(['chapters', 'script', 'synth']);
 
 /** Run exactly one stage. The CLI and local UI both use this instead of duplicating orchestration. */
 export async function runStage(options: RunStageOptions): Promise<RunStageResult> {
+  return withWarningReporter((message) => {
+    if (options.onEvent) options.onEvent({ type: 'warning', stage: options.stage, message });
+    else console.warn(`  ${message}`);
+  }, () => executeStage(options));
+}
+
+async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
   const { epubPath, workRoot, outDir, stage, rebuild, rerun, onEvent } = options;
   if (!STAGES.includes(stage)) throw new Error(`Unknown stage "${stage}".`);
   if (!fs.existsSync(epubPath)) throw new Error(`EPUB file not found: ${epubPath}`);

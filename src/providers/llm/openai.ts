@@ -1,6 +1,7 @@
 import OpenAI from 'openai';
 import type { z } from 'zod';
 import { config } from '../../config.js';
+import { reportWarning } from '../../util/warnings.js';
 
 let client: OpenAI | undefined;
 
@@ -80,7 +81,7 @@ export async function jsonCall<S extends z.ZodType>(opts: {
     } catch (err) {
       if (attempt === maxRetries) throw err;
       const backoff = 2000 * 2 ** (attempt - 1);
-      console.warn(`  LLM call failed (${(err as Error).message}), retrying in ${backoff / 1000}s...`);
+      reportWarning(`LLM call failed (${(err as Error).message}), retrying in ${backoff / 1000}s...`);
       await new Promise((r) => setTimeout(r, backoff));
       continue;
     }
@@ -93,6 +94,7 @@ export async function jsonCall<S extends z.ZodType>(opts: {
       if (attempt === maxRetries) {
         throw new Error(`LLM returned invalid JSON after ${maxRetries} attempts: ${lastError}`);
       }
+      reportWarning(`LLM returned invalid JSON (${lastError}), retrying (attempt ${attempt + 1} of ${maxRetries})...`);
     }
   }
   throw new Error('unreachable');

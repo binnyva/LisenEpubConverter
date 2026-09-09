@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { reportWarning } from '../util/warnings.js';
 import crypto from 'node:crypto';
 import pLimit from 'p-limit';
 import { getTTSProvider } from '../providers/tts/openai.js';
@@ -113,8 +114,9 @@ async function synthesizeWithRetry(
       });
     } catch (err) {
       lastErr = err;
+      if (attempt === 4) break;
       const backoff = 2000 * 2 ** (attempt - 1);
-      console.warn(`  TTS failed (${(err as Error).message}), retrying in ${backoff / 1000}s...`);
+      reportWarning(`TTS failed (${(err as Error).message}), retrying in ${backoff / 1000}s...`);
       await new Promise((r) => setTimeout(r, backoff));
     }
   }
