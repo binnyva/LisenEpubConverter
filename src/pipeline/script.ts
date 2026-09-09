@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { z } from 'zod';
 import { jsonCall } from '../providers/llm/openai.js';
 import { config } from '../config.js';
-import { splitIntoBlocks } from '../util/text.js';
+import { hasNarratableText, normalizeNonBreakingSpaces, splitIntoBlocks } from '../util/text.js';
 import type { WorkDir } from '../state.js';
 import {
   ScriptSegmentSchema,
@@ -17,6 +17,16 @@ const SegmentsSchema = z.object({ segments: z.array(ScriptSegmentSchema) });
 const VerifySchema = z.object({
   attributions: z.array(z.object({ id: z.number(), speaker: z.string() })),
 });
+
+/** Remove layout-only segments before they can reach speaker attribution or TTS. */
+export function filterNarratableSegments(segments: ScriptSegment[]): ScriptSegment[] {
+  return segments
+    .map((segment) => {
+      const text = normalizeNonBreakingSpaces(segment.text);
+      return text === segment.text ? segment : { ...segment, text };
+    })
+    .filter((segment) => hasNarratableText(segment.text));
+}
 
 /**
  * Stage 4: turn each cleaned chapter into an ordered script of
@@ -43,7 +53,16 @@ export async function runScript(work: WorkDir): Promise<void> {
 
   for (const ch of narratable) {
     const scriptFile = `script/${String(ch.index).padStart(2, '0')}.json`;
-    if (fs.existsSync(work.path(scriptFile))) continue;
+    if (fs.existsSync(work.path(scriptFile))) {
+      // Keep per-chapter resume behavior, while repairing old output produced
+      // before the layout-only segment guard was added.
+      const existing = work.readJson<ChapterScript>(scriptFile);
+      const segments = filterNarratableSegments(existing.segments);
+      if (segments.length !== existing.segments.length || segments.some((segment, i) => segment !== existing.segments[i])) {
+        work.writeJson(scriptFile, { ...existing, segments });
+      }
+      continue;
+    }
 
     const text = fs.readFileSync(
       work.path(`chapters-clean/${String(ch.index).padStart(2, '0')}.md`),
@@ -62,7 +81,7 @@ export async function runScript(work: WorkDir): Promise<void> {
       segments = await attributeChapter(text, ch.index, ch.title, analysis, summaries, canonical);
     }
 
-    const script: ChapterScript = { index: ch.index, segments };
+    const script: ChapterScript = { index: ch.index, segments: filterNarratableSegments(segments) };
     work.writeJson(scriptFile, script);
   }
 }
@@ -90,7 +109,9 @@ async function attributeChapter(
       system: `You convert book text into a multi-voice audiobook script. Respond with JSON: {"segments": [{"speaker", "text", "delivery"?, "confidence"}]}.
 
 Rules:
-- Split the text into an ordered list of segments covering ALL of the text, in order. Copy text VERBATIM — never rewrite, drop, or summarize anything.
+- Split all narratable prose into an ordered list of segments, in order. Copy that text VERBATIM — never rewrite, drop, or summarize it.
+- Do not emit decorative layout-only section dividers, such as lines made solely of repeated asterisks, dashes, underscores, or whitespace. They are not narratable text and are excluded from the coverage requirement.
+- Every segment must contain spoken content (at least one letter or number); never return a punctuation-only segment.
 - "speaker" is "narrator" for all narration and dialogue tags ("she said"), or the character's name for quoted dialogue.
 - Dialogue tags stay with the narrator: '"Hello," said Tom.' becomes [Tom] "Hello," + [narrator] said Tom.
 - Keep quotation marks in the dialogue text.

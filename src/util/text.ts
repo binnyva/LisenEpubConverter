@@ -65,3 +65,17 @@ export function splitSentences(text: string, maxChars: number): string[] {
 export function countWords(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
 }
+
+/** Replace non-breaking Unicode space variants with ordinary ASCII spaces. */
+export function normalizeNonBreakingSpaces(text: string): string {
+  return text.replace(/[\u00a0\u2007\u202f]/g, ' ');
+}
+
+/**
+ * Whether text contains something a narrator could say. Decorative EPUB
+ * section dividers are often represented as runs of asterisks or dashes;
+ * they should never become TTS segments.
+ */
+export function hasNarratableText(text: string): boolean {
+  return /[\p{L}\p{N}]/u.test(text);
+}

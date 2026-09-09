@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { z } from 'zod';
 import { jsonCall } from '../providers/llm/openai.js';
 import { config } from '../config.js';
-import { splitIntoBlocks } from '../util/text.js';
+import { normalizeNonBreakingSpaces, splitIntoBlocks } from '../util/text.js';
 import type { WorkDir } from '../state.js';
 import type { Analysis, BookMetadata, ChapterSummaries } from '../types.js';
 
@@ -34,7 +34,13 @@ export async function runChapters(work: WorkDir): Promise<void> {
 
   for (const ch of narratable) {
     const cleanFile = `chapters-clean/${String(ch.index).padStart(2, '0')}.md`;
-    if (summaries[ch.index] !== undefined && fs.existsSync(work.path(cleanFile))) continue;
+    if (summaries[ch.index] !== undefined && fs.existsSync(work.path(cleanFile))) {
+      // Repair legacy clean files without re-running an LLM call.
+      const existing = fs.readFileSync(work.path(cleanFile), 'utf8');
+      const normalized = normalizeNonBreakingSpaces(existing);
+      if (normalized !== existing) fs.writeFileSync(work.path(cleanFile), normalized);
+      continue;
+    }
 
     console.log(`  Chapter ${ch.index}: "${ch.title}" (${ch.words} words)`);
     const text = fs.readFileSync(work.path(ch.file), 'utf8');
@@ -57,6 +63,7 @@ cleanedText rules — change AS LITTLE AS POSSIBLE:
 - Keep the text verbatim except for things that read badly aloud.
 - Expand abbreviations that a narrator would say in full (e.g. "Mr." stays, but "i.e." becomes "that is").
 - Spell out unusual symbols, footnote markers, or citation numbers, or drop them if they add nothing.
+- Drop decorative layout-only section dividers (for example, lines made only of repeated asterisks, dashes, or underscores). They are not narration.
 - Keep markdown headings as-is (they are handled later).
 - Never summarize, shorten, or reorder the actual content.
 
@@ -69,7 +76,7 @@ Chapter ${ch.index}: "${ch.title}"${blocks.length > 1 ? ` (part ${i + 1} of ${bl
 Text:
 ${block}`,
       });
-      cleanedParts.push(result.cleanedText);
+      cleanedParts.push(normalizeNonBreakingSpaces(result.cleanedText));
       partialSummaries.push(result.partialSummary);
     }
 
