@@ -10,6 +10,8 @@ import { runChapters } from './chapters.js';
 import { runExtract } from './extract.js';
 import { runScript } from './script.js';
 import { runSynth } from './synth.js';
+import { runVoices } from './voices.js';
+import type { VoiceTarget } from '../voices/library.js';
 
 export type ChapterStage = 'chapters' | 'script' | 'synth';
 
@@ -20,6 +22,8 @@ export interface PipelineEvent {
 }
 
 export interface RunStageOptions {
+  voiceTarget?: VoiceTarget;
+  voiceLibraryFile?: string;
   epubPath: string;
   workRoot: string;
   outDir: string;
@@ -72,6 +76,10 @@ export async function runStage(options: RunStageOptions): Promise<RunStageResult
   }
 
   const selected = await validatePrerequisites(work, stage, chapterIndexes);
+  if (stage === 'synth' && work.isDone('synth') && work.synthesisInputsChanged()) {
+    work.invalidateFrom('synth');
+    clearArtifactsFrom(work, 'synth');
+  }
   if (!chapterIndexes && work.isDone(stage) && !rebuild && !rerun) {
     onEvent?.({ type: 'skipped', stage, message: `${stage} is already complete.` });
     return { work, stage, skipped: true };
@@ -101,9 +109,14 @@ export async function runStage(options: RunStageOptions): Promise<RunStageResult
       await runCasting(work);
       work.markDone(stage);
       break;
+    case 'voices':
+      runVoices(work, options.voiceTarget, options.voiceLibraryFile);
+      work.markDone(stage);
+      break;
     case 'synth':
       await runSynth(work, selected);
       markChapterStage(work, stage, selected);
+      if (!selected || work.isDone('synth')) work.recordSynthesisInputs();
       break;
     case 'assemble':
       output = runAssemble(work, outDir, chapterIndexes);
@@ -173,6 +186,9 @@ export function recoverStageStateFromArtifacts(work: WorkDir): boolean {
   if (!fs.existsSync(work.path('casting.json'))) return changed;
   work.markDone('casting');
 
+  if (!fs.existsSync(work.path('voice-bindings.json'))) return changed;
+  work.markDone('voices');
+
   const hasAudio = narratable.every((index) => fs.existsSync(work.path(`audio/${String(index).padStart(2, '0')}-segments.json`)));
   if (hasAudio) work.markChaptersDone('synth', narratable, narratable);
   return changed;
@@ -181,11 +197,12 @@ export function recoverStageStateFromArtifacts(work: WorkDir): boolean {
 /** Remove derived output only for an explicit rebuild; audio cache is intentionally retained. */
 export function clearArtifactsFrom(work: WorkDir, stage: Stage): void {
   const files: Partial<Record<Stage, string[]>> = {
-    extract: ['chapters', 'metadata.json', 'analysis.json', 'chapters-clean', 'chapter-summaries.json', 'script', 'casting.json', 'audio'],
-    analyze: ['analysis.json', 'chapters-clean', 'chapter-summaries.json', 'script', 'casting.json', 'audio'],
-    chapters: ['chapters-clean', 'chapter-summaries.json', 'script', 'casting.json', 'audio'],
-    script: ['script', 'casting.json', 'audio'],
-    casting: ['casting.json', 'audio'],
+    extract: ['chapters', 'metadata.json', 'analysis.json', 'chapters-clean', 'chapter-summaries.json', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
+    analyze: ['analysis.json', 'chapters-clean', 'chapter-summaries.json', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
+    chapters: ['chapters-clean', 'chapter-summaries.json', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
+    script: ['script', 'casting.json', 'voice-bindings.json', 'audio'],
+    casting: ['casting.json', 'voice-bindings.json', 'audio'],
+    voices: ['voice-bindings.json', 'audio'],
     synth: ['audio'],
   };
   for (const rel of files[stage] ?? []) fs.rmSync(work.path(rel), { recursive: true, force: true });
@@ -256,8 +273,11 @@ async function validatePrerequisites(
       requireDone('analyze');
       if (!fs.existsSync(work.path('script'))) throw new Error('Run script for at least one chapter before casting.');
       break;
+    case 'voices':
+      if (!fs.existsSync(work.path('casting.json'))) throw new Error('Run casting before voices.');
+      return;
     case 'synth':
-      requireDone('casting');
+      requireDone('voices');
       if (!requested) requireDone('script');
       break;
     case 'assemble':

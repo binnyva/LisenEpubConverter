@@ -5,6 +5,7 @@ import { getTTSProvider } from '../providers/tts/openai.js';
 import { markdownToSpeakable } from '../epub/markdown.js';
 import { splitSentences } from '../util/text.js';
 import { config } from '../config.js';
+import { validateVoiceBindings } from './voices.js';
 import type { WorkDir } from '../state.js';
 import type { BookMetadata, Casting, ChapterAudioManifest, ChapterScript } from '../types.js';
 
@@ -15,8 +16,9 @@ import type { BookMetadata, Casting, ChapterAudioManifest, ChapterScript } from 
  */
 export async function runSynth(work: WorkDir, chapterIndexes?: number[]): Promise<void> {
   const casting = work.readJson<Casting>('casting.json');
+  const bindings = validateVoiceBindings(work);
   const meta = work.readJson<BookMetadata>('metadata.json');
-  const provider = getTTSProvider();
+  const provider = getTTSProvider(bindings.target);
 
   // Casting instructions that mention a nationality or accent ("Portuguese-
   // accented narration") can make the TTS model switch into that language and
@@ -45,11 +47,15 @@ export async function runSynth(work: WorkDir, chapterIndexes?: number[]): Promis
 
     const pieces: Array<{ hash: string; text: string; voiceId: string; instructions: string }> = [];
     for (const seg of script.segments) {
-      const voice =
+      const speaker =
         seg.speaker === 'narrator'
           ? casting.narrator
           : (casting.characters[seg.speaker] ?? casting.narrator);
-      const instructions = [voice.instructions, seg.delivery ? `Delivery: ${seg.delivery}.` : '']
+      const binding =
+        seg.speaker === 'narrator'
+          ? bindings.narrator
+          : (bindings.characters[seg.speaker] ?? bindings.narrator);
+      const instructions = [speaker.instructions, seg.delivery ? `Delivery: ${seg.delivery}.` : '']
         .filter(Boolean)
         .join(' ');
 
@@ -58,10 +64,10 @@ export async function runSynth(work: WorkDir, chapterIndexes?: number[]): Promis
       for (const text of splitSentences(speakable, provider.maxChars)) {
         const hash = crypto
           .createHash('sha256')
-          .update([provider.id, config.ttsModel, voice.voiceId, instructions, text].join('\x1f'))
+          .update([binding.provider, binding.model, binding.voiceId, instructions, text].join('\x1f'))
           .digest('hex')
           .slice(0, 24);
-        pieces.push({ hash, text, voiceId: voice.voiceId, instructions });
+        pieces.push({ hash, text, voiceId: binding.voiceId, instructions });
       }
     }
 

@@ -11,6 +11,8 @@ export interface WorkState {
   sourceChanged?: boolean;
   /** Completion timestamps for stages that can be run a chapter at a time. */
   chapterCompleted?: Partial<Record<'chapters' | 'script' | 'synth', Record<string, string>>>;
+  /** Hash of the cast and concrete bindings used by the last completed synthesis. */
+  synthesisInputHash?: string;
 }
 
 /**
@@ -121,7 +123,17 @@ export class WorkDir {
         delete this.state.chapterCompleted?.[s];
       }
     }
+    if (start <= STAGES.indexOf('synth')) delete this.state.synthesisInputHash;
     this.save();
+  }
+
+  recordSynthesisInputs(): void {
+    this.state.synthesisInputHash = this.synthesisInputsHash();
+    this.save();
+  }
+
+  synthesisInputsChanged(): boolean {
+    return Boolean(this.state.synthesisInputHash && this.state.synthesisInputHash !== this.synthesisInputsHash());
   }
 
   status(): Array<{ stage: Stage; done: boolean; at?: string }> {
@@ -147,5 +159,13 @@ export class WorkDir {
 
   private save(): void {
     fs.writeFileSync(this.path('state.json'), JSON.stringify(this.state, null, 2));
+  }
+
+  private synthesisInputsHash(): string {
+    const inputs = ['casting.json', 'voice-bindings.json'].map((file) => {
+      const full = this.path(file);
+      return fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : '';
+    });
+    return crypto.createHash('sha256').update(inputs.join('\x1f')).digest('hex');
   }
 }

@@ -24,23 +24,24 @@ Options for `convert`:
 | --- | --- |
 | `--out <dir>` | Where the final `.m4b` goes (default `.`) |
 | `--work <dir>` | Work directory for intermediate artifacts (default `./work`) |
-| `--from <stage>` | Re-run from a stage: extract, analyze, chapters, script, casting, synth, assemble |
+| `--from <stage>` | Re-run from a stage: extract, analyze, chapters, script, casting, voices, synth, assemble |
 | `--force` | Re-run everything from scratch |
-| `--dry-run` | Stop before synthesis so `script/` and `casting.json` can be reviewed |
+| `--dry-run` | Stop before synthesis so scripts, casting, and voice bindings can be reviewed |
 
 ## Pipeline
 
 ```
-EPUB → extract → analyze → chapters → script → casting → synth → assemble → book.m4b
+EPUB → extract → analyze → chapters → script → casting → voices → synth → assemble → book.m4b
 ```
 
 1. **extract** — EPUB → one markdown file per chapter (`chapters/`), plus `metadata.json` and cover. Images become their alt text, links keep only their text, footnote markers are dropped.
 2. **analyze** — LLM pass: fiction detection, book summary, character/author profiles, and a narrate/skip decision per chapter (ToC, acknowledgments, license pages etc. are skipped).
 3. **chapters** — per-chapter summary + minimal audio-friendly cleanup (`chapters-clean/`).
 4. **script** — dialogue attribution into `{speaker, text, delivery}` segments (`script/`), with a verification pass on low-confidence lines. Non-fiction is all narrator.
-5. **casting** — voice per speaker (`casting.json`). The most talkative characters get distinct voices; minor ones share voices differentiated by delivery instructions. **Hand-edit this file before synthesis if you want different voices.**
-6. **synth** — TTS per segment, cached by content hash in `audio-cache/` — crashes and re-runs never pay for the same audio twice.
-7. **assemble** — ffmpeg concat into per-chapter M4As, then a single `.m4b` with chapter markers, tags, and cover art.
+5. **casting** — desired voice profile and delivery instructions per speaker (`casting.json`), independent of any TTS model.
+6. **voices** — match the cast against the shared voice library and save concrete, reviewable provider/model/voice assignments in `voice-bindings.json`. Run `lisen voices refresh` or import a catalogue before this stage.
+7. **synth** — TTS per segment, cached by content hash in `audio-cache/` — crashes and re-runs never pay for the same audio twice.
+8. **assemble** — ffmpeg concat into per-chapter M4As, then a single `.m4b` with chapter markers, tags, and cover art.
 
 Every stage records completion in `work/<book>/state.json`; re-running resumes where it left off. Stages 3, 4, and 6 also resume mid-stage (per chapter / per segment). If the EPUB file itself changes, the stage state is cleared automatically.
 
@@ -75,7 +76,8 @@ work/alice/
   chapters-clean/          # audio-friendly text
   chapter-summaries.json
   script/                  # per-chapter {speaker, text, delivery} segments
-  casting.json             # speaker → voice + instructions (hand-editable)
+  casting.json             # speaker → desired voice profile + instructions
+  voice-bindings.json      # speaker → concrete library/provider/model/voice choice
   audio-cache/             # one mp3 per synthesized segment, keyed by hash
   audio/                   # per-chapter m4a + segment manifests
 ```
@@ -95,6 +97,7 @@ Environment variables (see `src/config.ts` for defaults):
 - `LISEN_OPENROUTER_SITE_URL` — optional application URL sent to OpenRouter for attribution
 - `LISEN_TTS_MAX_CHARS` — maximum characters in one TTS request (default `4000`)
 - `LISEN_TTS_VOICES_FILE` — JSON catalogue of voices for a non-OpenAI OpenRouter speech model
+- `LISEN_VOICE_LIBRARY_FILE` — shared model and voice library path (default `./voices.json`)
 
 Other tunables (concurrency, chunk sizes, voice slots, bitrate) are constants in `src/config.ts`.
 
@@ -123,6 +126,19 @@ OpenRouter's OpenAI speech models use Lisen's built-in OpenAI voice catalogue. O
 The catalogue must be a non-empty array with unique IDs. Consult the selected OpenRouter model's documentation for valid voice IDs and its text-length limit; set `LISEN_TTS_MAX_CHARS` when that limit is below 4000. For OpenAI speech models routed through OpenRouter, Lisen forwards narration and delivery instructions. Other models receive the standard text-and-voice request only, since style controls are provider-specific.
 
 To add a direct TTS provider, implement `TTSProvider` (`src/providers/tts/types.ts`) and register it in `getTTSProvider()` (`src/providers/tts/openai.ts`).
+
+### Voice library and casting
+
+The shared library is separate from book work folders. Refresh the built-in OpenAI catalogue or import a provider/model-specific legacy catalogue before applying voices to a book:
+
+```bash
+npm run dev -- voices refresh
+npm run dev -- voices import ./my-model-voices.json --provider openrouter --model provider/model
+npm run dev -- voices list
+npm run dev -- voices apply book.epub
+```
+
+`casting.json` records what each character should sound like: presentation, age, tone, language, accent, and delivery instructions. `voice-bindings.json` records the model and concrete native voice ID selected from the library. Automatic matches prefer compatible, unused voices with matching traits. In the local UI, selecting a binding is a manual override and it is retained when voices are applied again, as long as it remains compatible with the chosen model.
 
 ## Development
 

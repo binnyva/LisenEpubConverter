@@ -15,8 +15,8 @@ export function checkFfmpeg(): void {
   }
 }
 
-export function checkApiKeys(): void {
-  const providers = new Set<ProviderId>([config.llmProvider, config.ttsProvider]);
+export function checkApiKeys(required: ProviderId[] = [config.llmProvider, config.ttsProvider]): void {
+  const providers = new Set<ProviderId>(required);
   const missing = [...providers].filter((provider) => {
     const key = provider === 'openai' ? 'OPENAI_API_KEY' : 'OPENROUTER_API_KEY';
     return !process.env[key];

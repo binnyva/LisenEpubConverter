@@ -14,11 +14,12 @@ for (const envFile of [
     break;
   }
 }
-import { STAGES, type Stage } from './config.js';
+import { config, STAGES, type Stage } from './config.js';
 import { WorkDir } from './state.js';
 import { checkApiKeys, checkFfmpeg } from './checks.js';
 import { discoverBooks, runStage } from './pipeline/runner.js';
 import { startLocalUi } from './ui/server.js';
+import { defaultVoiceTarget, importVoiceLibrary, loadVoiceLibrary, refreshVoiceLibrary, type VoiceTarget } from './voices/library.js';
 
 const program = new Command();
 program
@@ -127,7 +128,8 @@ program
     if (!STAGES.includes(stage as Stage)) throw new Error(`Unknown stage "${stage}". Stages: ${STAGES.join(', ')}`);
     if (!fs.existsSync(epub)) throw new Error(`file not found: ${epub}`);
     if (stage === 'assemble') checkFfmpeg();
-    if (stage !== 'extract' && stage !== 'assemble') checkApiKeys();
+    if (['analyze', 'chapters', 'script', 'casting'].includes(stage)) checkApiKeys([config.llmProvider]);
+    if (stage === 'synth') checkApiKeys([config.ttsProvider]);
     const chapters = opts.chapters
       ? String(opts.chapters).split(',').map((value) => Number.parseInt(value.trim(), 10))
       : undefined;
@@ -157,6 +159,62 @@ program
     const url = await startLocalUi({ workRoot: opts.work, outDir: opts.out, port });
     console.log(`Lisen UI is running at ${url}`);
   });
+
+const voices = program.command('voices').description('Manage the shared TTS model and voice library');
+voices
+  .command('refresh')
+  .option('--provider <provider>', 'TTS provider (openai or openrouter)')
+  .option('--model <model>', 'TTS model')
+  .option('--library <file>', 'voice library JSON file')
+  .action((opts) => {
+    const target = voiceTargetFromOptions(opts);
+    const library = refreshVoiceLibrary(target, opts.library);
+    console.log(`Saved ${library.voices.filter((voice) => voice.models.includes(`${target.provider}:${target.model}`)).length} voice(s) for ${target.provider}/${target.model}.`);
+  });
+voices
+  .command('import')
+  .argument('<catalogue>', 'legacy JSON voice catalogue')
+  .requiredOption('--provider <provider>', 'TTS provider (openai or openrouter)')
+  .requiredOption('--model <model>', 'TTS model')
+  .option('--library <file>', 'voice library JSON file')
+  .action((catalogue, opts) => {
+    const target = voiceTargetFromOptions(opts);
+    const library = importVoiceLibrary(catalogue, target, opts.library);
+    console.log(`Imported ${library.voices.filter((voice) => voice.models.includes(`${target.provider}:${target.model}`)).length} voice(s) for ${target.provider}/${target.model}.`);
+  });
+voices
+  .command('list')
+  .option('--provider <provider>', 'filter by provider')
+  .option('--model <model>', 'filter by model')
+  .option('--library <file>', 'voice library JSON file')
+  .action((opts) => {
+    const library = loadVoiceLibrary(opts.library);
+    const target = opts.provider || opts.model ? voiceTargetFromOptions(opts) : undefined;
+    const targetId = target && `${target.provider}:${target.model}`;
+    for (const voice of library.voices.filter((entry) => !targetId || entry.models.includes(targetId))) {
+      console.log(`${voice.id}\t${voice.description || voice.traits.tone.join(', ')}`);
+    }
+  });
+voices
+  .command('apply')
+  .argument('<epub>', 'path to the .epub file')
+  .option('--provider <provider>', 'voice provider (openai, openrouter, or fish)')
+  .option('--model <model>', 'TTS model')
+  .option('--library <file>', 'voice library JSON file')
+  .option('--work <dir>', 'work directory', './work')
+  .option('--out <dir>', 'output directory', '.')
+  .action(async (epub, opts) => {
+    if (!fs.existsSync(epub)) throw new Error(`file not found: ${epub}`);
+    await runStage({ epubPath: epub, workRoot: opts.work, outDir: opts.out, stage: 'voices', voiceTarget: voiceTargetFromOptions(opts), voiceLibraryFile: opts.library, rerun: true, onEvent: (event) => console.log(`[${event.stage}] ${event.message}`) });
+  });
+
+function voiceTargetFromOptions(opts: { provider?: string; model?: string }): VoiceTarget {
+  const fallback = defaultVoiceTarget();
+  const provider = opts.provider ?? fallback.provider;
+  if (provider !== 'openai' && provider !== 'openrouter' && provider !== 'fish') throw new Error('Voice provider must be "openai", "openrouter", or "fish".');
+  if (provider !== fallback.provider && !opts.model) throw new Error('Specify --model when selecting a different voice provider.');
+  return { provider, model: opts.model ?? fallback.model };
+}
 
 program.parseAsync().catch((err) => {
   console.error(`\nError: ${err.message}`);

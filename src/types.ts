@@ -85,19 +85,58 @@ export type ChapterScript = z.infer<typeof ChapterScriptSchema>;
 
 // ---------- Stage 5: casting ----------
 
-export const VoiceAssignmentSchema = z.object({
-  voiceId: z.string(),
+export const VoiceProfileSchema = z.object({
+  /** Desired presentation. This describes the character, not a provider voice. */
+  presentation: z.enum(['male', 'female', 'neutral', 'unknown']).default('unknown'),
+  age: z.string().default('unknown'),
+  tone: z.array(z.string()).default([]),
+  language: z.string().default('unknown'),
+  accent: z.string().default('unspecified'),
+});
+export type VoiceProfile = z.infer<typeof VoiceProfileSchema>;
+
+export const CastSpeakerSchema = z.object({
+  voiceProfile: VoiceProfileSchema,
   /** Standing instructions for this speaker's delivery, e.g. "Elderly gruff Scottish man." */
   instructions: z.string().default(''),
 });
-export type VoiceAssignment = z.infer<typeof VoiceAssignmentSchema>;
+export type CastSpeaker = z.infer<typeof CastSpeakerSchema>;
 
 export const CastingSchema = z.object({
-  narrator: VoiceAssignmentSchema,
+  version: z.literal(2).default(2),
+  narrator: CastSpeakerSchema,
   /** Keyed by canonical character name. */
-  characters: z.record(z.string(), VoiceAssignmentSchema),
+  characters: z.record(z.string(), CastSpeakerSchema),
 });
 export type Casting = z.infer<typeof CastingSchema>;
+
+// ---------- Stage 6: voice bindings ----------
+
+export const VoiceBindingSchema = z.object({
+  libraryVoiceId: z.string(),
+  provider: z.enum(['openai', 'openrouter', 'fish']),
+  model: z.string(),
+  voiceId: z.string(),
+  selection: z.enum(['automatic', 'manual']).default('automatic'),
+  match: z.object({
+    reasons: z.array(z.string()).default([]),
+    limitations: z.array(z.string()).default([]),
+  }).default({ reasons: [], limitations: [] }),
+});
+export type VoiceBinding = z.infer<typeof VoiceBindingSchema>;
+
+export const VoiceBindingsSchema = z.object({
+  version: z.literal(1).default(1),
+  libraryFile: z.string().optional(),
+  target: z.object({
+    provider: z.enum(['openai', 'openrouter', 'fish']),
+    model: z.string(),
+  }),
+  narrator: VoiceBindingSchema,
+  /** Keyed by the same stable speaker key as casting.json. */
+  characters: z.record(z.string(), VoiceBindingSchema),
+});
+export type VoiceBindings = z.infer<typeof VoiceBindingsSchema>;
 
 // ---------- Stage 6: synth ----------
 

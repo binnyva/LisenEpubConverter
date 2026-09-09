@@ -4,10 +4,20 @@ import type { SynthesisRequest, TTSProvider, Voice } from './types.js';
 import { OpenRouterTTSProvider } from './openrouter.js';
 import { OPENAI_VOICES } from './voices.js';
 
+export interface TTSProviderTarget {
+  provider: 'openai' | 'openrouter' | 'fish';
+  model: string;
+}
+
 export class OpenAITTSProvider implements TTSProvider {
   readonly id = 'openai';
   readonly maxChars = config.ttsMaxChars;
   private client = new OpenAI();
+  private readonly model: string;
+
+  constructor(target: TTSProviderTarget = { provider: config.ttsProvider, model: config.ttsModel }) {
+    this.model = target.model;
+  }
 
   listVoices(): Voice[] {
     return OPENAI_VOICES;
@@ -15,7 +25,7 @@ export class OpenAITTSProvider implements TTSProvider {
 
   async synthesize(req: SynthesisRequest): Promise<Buffer> {
     const res = await this.client.audio.speech.create({
-      model: config.ttsModel,
+      model: this.model,
       voice: req.voiceId,
       input: req.text,
       ...(req.instructions ? { instructions: req.instructions } : {}),
@@ -25,13 +35,15 @@ export class OpenAITTSProvider implements TTSProvider {
   }
 }
 
-export function getTTSProvider(): TTSProvider {
-  switch (config.ttsProvider) {
+export function getTTSProvider(target: TTSProviderTarget = { provider: config.ttsProvider, model: config.ttsModel }): TTSProvider {
+  switch (target.provider) {
     case 'openai':
-      return new OpenAITTSProvider();
+      return new OpenAITTSProvider(target);
     case 'openrouter':
-      return new OpenRouterTTSProvider();
+      return new OpenRouterTTSProvider(target);
+    case 'fish':
+      throw new Error('Fish voice bindings are supported, but the Fish synthesis adapter is not implemented yet.');
     default:
-      throw new Error(`Unknown TTS provider: ${config.ttsProvider}`);
+      throw new Error(`Unknown TTS provider: ${target.provider}`);
   }
 }

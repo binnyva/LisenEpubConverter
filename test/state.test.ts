@@ -48,4 +48,19 @@ describe('WorkDir chapter completion', () => {
     changed.acceptCurrentEpub();
     expect(changed.sourceChanged()).toBe(false);
   });
+
+  it('detects hand edits to the cast or bindings after synthesis', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lisen-state-'));
+    temporaryRoots.push(root);
+    const epub = path.join(root, 'book.epub');
+    fs.writeFileSync(epub, crypto.randomBytes(32));
+    const work = new WorkDir(epub, root);
+    work.writeJson('casting.json', { narrator: { instructions: 'Steady.' } });
+    work.writeJson('voice-bindings.json', { narrator: { voiceId: 'voice-a' } });
+    work.recordSynthesisInputs();
+    expect(work.synthesisInputsChanged()).toBe(false);
+
+    work.writeJson('voice-bindings.json', { narrator: { voiceId: 'voice-b' } });
+    expect(work.synthesisInputsChanged()).toBe(true);
+  });
 });

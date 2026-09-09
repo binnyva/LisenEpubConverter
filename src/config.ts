@@ -50,6 +50,10 @@ export const config = {
   get ttsVoicesFile(): string | undefined {
     return process.env.LISEN_TTS_VOICES_FILE;
   },
+  /** Shared, provider-neutral voice library. It is intentionally outside book work folders. */
+  get voiceLibraryFile(): string {
+    return process.env.LISEN_VOICE_LIBRARY_FILE ?? './library/voices.json';
+  },
   /** Max characters sent to the LLM per chunk when processing chapter text. */
   llmChunkChars: 9000,
   /** Max characters per TTS request (OpenAI speech limit is 4096). */
@@ -72,6 +76,7 @@ export const STAGES = [
   'chapters',
   'script',
   'casting',
+  'voices',
   'synth',
   'assemble',
 ] as const;
