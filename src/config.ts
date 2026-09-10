@@ -56,6 +56,8 @@ export const config = {
   },
   /** Max characters sent to the LLM per chunk when processing chapter text. */
   llmChunkChars: 9000,
+  /** Status heartbeat while a chapter request is pending. */
+  progressIntervalMs: 10_000,
   /** Max characters per TTS request (OpenAI speech limit is 4096). */
   get ttsMaxChars(): number {
     return positiveIntFromEnv('LISEN_TTS_MAX_CHARS', 4000);
@@ -74,6 +76,7 @@ export const STAGES = [
   'extract',
   'analyze',
   'chapters',
+  'list-characters',
   'script',
   'casting',
   'voices',

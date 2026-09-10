@@ -25,7 +25,7 @@ function escapeMeta(s: string): string {
 }
 
 /**
- * Stage 7: concatenate cached segments into per-chapter M4A files, then all
+ * Stage 9: concatenate cached segments into per-chapter M4A files, then all
  * chapters into a single M4B with chapter markers, tags and cover art.
  */
 export function runAssemble(work: WorkDir, outDir: string, chapterIndexes?: number[]): string {

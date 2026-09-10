@@ -64,10 +64,39 @@ export interface ChapterSummaries {
   [index: string]: string;
 }
 
-// ---------- Stage 4: script ----------
+export const CharacterObservationSchema = PersonProfileSchema.extend({
+  /** Short quotation or concrete textual evidence for identity and traits. */
+  evidence: z.string().min(1),
+  /** False for role descriptions such as "the station guard". */
+  named: z.boolean(),
+  confidence: z.enum(['high', 'low']),
+});
+export type CharacterObservation = z.infer<typeof CharacterObservationSchema>;
+
+export const ChapterCharactersSchema = z.object({
+  index: z.number().int().nonnegative(),
+  observations: z.array(CharacterObservationSchema.extend({ chunk: z.number().int().nonnegative() })),
+});
+export type ChapterCharacters = z.infer<typeof ChapterCharactersSchema>;
+
+// ---------- Stage 4: list characters ----------
+
+export const CharacterRegistrySchema = z.object({
+  version: z.literal(1),
+  chapters: z.array(z.number().int().nonnegative()),
+  characters: z.array(PersonProfileSchema.extend({
+    id: z.string(),
+    chapters: z.array(z.number().int().nonnegative()),
+    evidence: z.array(z.object({ chapter: z.number(), chunk: z.number(), text: z.string() })),
+    issues: z.array(z.string()),
+  })),
+});
+export type CharacterRegistry = z.infer<typeof CharacterRegistrySchema>;
+
+// ---------- Stage 5: script ----------
 
 export const ScriptSegmentSchema = z.object({
-  /** 'narrator' or a character name from the analysis cast. */
+  /** 'narrator' or a canonical name from the book's character registry. */
   speaker: z.string(),
   /** Verbatim text to be spoken. */
   text: z.string(),
@@ -79,11 +108,12 @@ export type ScriptSegment = z.infer<typeof ScriptSegmentSchema>;
 
 export const ChapterScriptSchema = z.object({
   index: z.number(),
+  characterRegistryHash: z.string().optional(),
   segments: z.array(ScriptSegmentSchema),
 });
 export type ChapterScript = z.infer<typeof ChapterScriptSchema>;
 
-// ---------- Stage 5: casting ----------
+// ---------- Stage 6: casting ----------
 
 export const VoiceProfileSchema = z.object({
   /** Desired presentation. This describes the character, not a provider voice. */
@@ -110,7 +140,7 @@ export const CastingSchema = z.object({
 });
 export type Casting = z.infer<typeof CastingSchema>;
 
-// ---------- Stage 6: voice bindings ----------
+// ---------- Stage 7: voice bindings ----------
 
 export const VoiceBindingSchema = z.object({
   libraryVoiceId: z.string(),
@@ -138,7 +168,7 @@ export const VoiceBindingsSchema = z.object({
 });
 export type VoiceBindings = z.infer<typeof VoiceBindingsSchema>;
 
-// ---------- Stage 6: synth ----------
+// ---------- Stage 8: synth ----------
 
 export interface ChapterAudioManifest {
   index: number;

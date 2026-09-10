@@ -11,7 +11,7 @@ import type { WorkDir } from '../state.js';
 import type { BookMetadata, Casting, ChapterAudioManifest, ChapterScript } from '../types.js';
 
 /**
- * Stage 6: synthesize every script segment to MP3. Each unique
+ * Stage 8: synthesize every script segment to MP3. Each unique
  * (text, voice, instructions) is cached by content hash, so re-runs and
  * crashes never pay for the same audio twice.
  */

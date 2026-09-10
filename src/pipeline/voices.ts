@@ -6,7 +6,7 @@ import { CastingSchema, ChapterScriptSchema, VoiceBindingsSchema, type CastSpeak
 import { config } from '../config.js';
 import { defaultVoiceTarget, loadVoiceLibrary, modelId, type LibraryVoice, type VoiceTarget } from '../voices/library.js';
 
-/** Stage 6: apply one compatible library model to a provider-neutral cast. */
+/** Stage 7: apply one compatible library model to a provider-neutral cast. */
 export function runVoices(work: WorkDir, target = defaultVoiceTarget(), libraryFile = config.voiceLibraryFile): VoiceBindings {
   const library = loadVoiceLibrary(libraryFile);
   const targetId = modelId(target);

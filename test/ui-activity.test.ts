@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import vm from 'node:vm';
 import { describe, expect, it, vi } from 'vitest';
+import { STAGES } from '../src/config.js';
 
 // Execute the actual browser script with a minimal DOM; no server or paid API calls.
 function browser() {
@@ -27,6 +28,49 @@ function browser() {
 }
 
 describe('UI stage activity', () => {
+  it('renders live text progress separately from chapter completion and resets it for another job', () => {
+    const { nodes, context } = browser();
+    const current = { id: 'progress-1', epubPath: '/book.epub', stage: 'script', status: 'running',
+      startedAt: Date.now() - 20000, progressUpdatedAt: Date.now() - 5000, events: [],
+      progress: { chapterIndex: 2, chapterTitle: '<Alice>', phase: 'attributing', block: 2, totalBlocks: 2,
+        processedChars: 8000, totalChars: 11000, completedChapters: 0, totalChapters: 2, elapsedMs: 10000 } };
+    context.current = current;
+    vm.runInContext('renderJob(current)', context);
+    expect(nodes.get('#chapter-progress').hidden).toBe(false);
+    expect(nodes.get('#progress-title').textContent).toBe('Chapter 3: <Alice>');
+    expect(nodes.get('#progress-bar').value).toBe(72);
+    expect(nodes.get('#progress-text').textContent).toBe('72% of text processed');
+    expect(nodes.get('#progress-phase').textContent).toContain('Attributing block 2/2 · 15s elapsed');
+    expect(nodes.get('#progress-chapters').textContent).toBe('0/2 chapters complete');
+    vm.runInContext("current.progress.phase='verifying';current.progress.processedChars=11000;current.progress.ambiguousSegments=4;renderJob(current)", context);
+    expect(nodes.get('#progress-bar').value).toBe(100);
+    expect(nodes.get('#progress-phase').textContent).toContain('Verifying 4');
+    expect(nodes.get('#progress-chapters').textContent).toBe('0/2 chapters complete');
+    vm.runInContext("current.status='failed';current.error='Verification failed';current.finishedAt=current.progressUpdatedAt;renderJob(current)", context);
+    expect(nodes.get('#activity-status').textContent).toContain('failed');
+    expect(nodes.get('#progress-phase').textContent).toContain('10s elapsed');
+    vm.runInContext("renderJob({id:'next',epubPath:'/book.epub',stage:'analyze',status:'running',events:[]})", context);
+    expect(nodes.get('#chapter-progress').hidden).toBe(true);
+  });
+
+  it('shows List Characters between Chapters and Script and renders discoveries safely', () => {
+    const { nodes, context } = browser();
+    expect(Array.from(vm.runInContext('stages', context))).toEqual([...STAGES]);
+    context.currentBook = {
+      epubPath: '/book.epub', epubAvailable: true, metadata: { title: 'Book' },
+      state: { completed: { chapters: 'done' } }, chapters: [],
+      characterObservations: [{ index: 4, observations: [{ name: '<Alice>', aliases: [], sex: 'unknown', age: 'unknown', country: 'unknown', evidence: '<quoted evidence>', confidence: 'low' }] }],
+    };
+    vm.runInContext('book=currentBook;render()', context);
+    expect(nodes.get('#stages').innerHTML).toContain('List Characters');
+    expect(nodes.get('#character-status').textContent).toContain('1 chapters scanned');
+    expect(nodes.get('#characters').innerHTML).toContain('&lt;Alice&gt;');
+    expect(nodes.get('#characters').innerHTML).toContain('chapters 5');
+    expect(nodes.get('#characters').innerHTML).toContain('Needs review');
+    vm.runInContext("book.state.completed['list-characters']='done';book.characterRegistry={characters:[]};renderCharacters()", context);
+    expect(nodes.get('#character-status').textContent).toBe('Book character registry · 0 characters');
+  });
+
   it.each(['completed', 'failed'])('shows retry warnings while polling and retains them after %s', async (status) => {
     const { nodes, fetch, context } = browser();
     await new Promise((resolve) => setImmediate(resolve));

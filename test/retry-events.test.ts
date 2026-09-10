@@ -28,8 +28,11 @@ async function scriptFixture() {
     chapters: [{ index: 0, narrate: true }],
   });
   work.writeJson('chapter-summaries.json', { 0: 'Alice speaks.' });
+  work.writeJson('characters.json', { version: 1, chapters: [0], characters: [
+    { id: 'alice', name: 'Alice', aliases: [], sex: 'female', age: 'child', importance: 'main', chapters: [0], evidence: [], issues: [] },
+  ] });
   fs.writeFileSync(path.join(work.dir('chapters-clean'), '00.md'), 'Hello.');
-  for (const stage of ['extract', 'analyze', 'chapters'] as const) work.markDone(stage);
+  for (const stage of ['extract', 'analyze', 'chapters', 'list-characters'] as const) work.markDone(stage);
   return { epubPath, workRoot: root, outDir: path.join(root, 'out'), stage: 'script' as const, rebuild: true };
 }
 
@@ -54,12 +57,12 @@ describe('script rebuild retry events', () => {
     const run = runStage({ ...options, onEvent });
     const outcome = exhausted ? expect(run).rejects.toThrow('(429)') : expect(run).resolves.toMatchObject({ stage: 'script' });
     await vi.advanceTimersByTimeAsync(0);
-    expect(onEvent.mock.calls.map(([event]) => event.type)).toEqual(['started', 'warning']);
-    expect(onEvent.mock.calls[1][0]).toMatchObject({ stage: 'script', message: expect.stringContaining('retrying in 2s') });
-    expect(onEvent.mock.calls[1][0].message).toContain('rate-limited upstream');
+    expect(onEvent.mock.calls.map(([event]) => event.type).filter((type) => type !== 'progress')).toEqual(['started', 'warning']);
+    expect(onEvent.mock.calls.find(([event]) => event.type === 'warning')![0]).toMatchObject({ stage: 'script', message: expect.stringContaining('retrying in 2s') });
+    expect(onEvent.mock.calls.find(([event]) => event.type === 'warning')![0].message).toContain('rate-limited upstream');
     await vi.runAllTimersAsync();
     await outcome;
-    expect(onEvent.mock.calls.map(([event]) => event.type)).toEqual(exhausted
+    expect(onEvent.mock.calls.map(([event]) => event.type).filter((type) => type !== 'progress')).toEqual(exhausted
       ? ['started', 'warning', 'warning'] : ['started', 'warning', 'completed']);
     expect(fetchMock).toHaveBeenCalledTimes(exhausted ? 3 : 2);
   });

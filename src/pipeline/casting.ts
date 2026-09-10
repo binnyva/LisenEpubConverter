@@ -3,12 +3,14 @@ import { jsonCall } from '../providers/llm/openai.js';
 import { config } from '../config.js';
 import { CastingSchema, type Analysis, type Casting, type ChapterScript } from '../types.js';
 import type { WorkDir } from '../state.js';
+import { readCharacterRegistry } from './list-characters.js';
 
 /**
- * Stage 5: describe intended character voices without selecting a provider or model.
+ * Stage 6: describe intended character voices without selecting a provider or model.
  */
 export async function runCasting(work: WorkDir): Promise<Casting> {
   const analysis = work.readJson<Analysis>('analysis.json');
+  const registry = readCharacterRegistry(work);
 
   // Count spoken segments per character across all chapter scripts.
   const counts = new Map<string, number>();
@@ -43,7 +45,7 @@ export async function runCasting(work: WorkDir): Promise<Casting> {
 
   const castDetails = ranked
     .map(([name, count]) => {
-      const c = analysis.characters.find((ch) => ch.name === name);
+      const c = registry.characters.find((ch) => ch.name === name);
       const traits = c
         ? `${c.sex}, age ${c.age}, ${c.race}, ${c.class}, ${c.country}`
         : 'unknown traits';
@@ -75,7 +77,7 @@ ${castDetails}`,
   for (const [name] of ranked) {
     const assignment = casting.characters[name];
     if (!assignment) {
-      const c = analysis.characters.find((ch) => ch.name === name);
+      const c = registry.characters.find((ch) => ch.name === name);
       casting.characters[name] = {
         voiceProfile: {
           presentation: c?.sex ?? 'unknown',

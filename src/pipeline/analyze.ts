@@ -8,7 +8,7 @@ const SKIP_TITLE_RE =
   /\b(contents|table of contents|acknowledg|thanks|appendix|index|copyright|license|colophon|dedication|about the author|also by|praise for|title page|other books|project gutenberg)\b/i;
 
 /**
- * Stage 2: one whole-book LLM call — fiction detection, summary, character and
+ * Stage 2: one sampled overview LLM call — fiction detection, provisional summary, character and
  * author profiles, and a narrate/skip decision per chapter.
  */
 export async function runAnalyze(work: WorkDir): Promise<Analysis> {
@@ -43,8 +43,9 @@ export async function runAnalyze(work: WorkDir): Promise<Analysis> {
 }
 Rules:
 - For non-fiction, "characters" should be an empty array.
-- List every named character that has spoken dialogue; set importance by how much they speak.
-- "country" is the country or accent the character would plausibly speak with.
+- The text is a sample, not the whole book. The summary and character list are provisional.
+- List only speaking characters supported by the supplied excerpts; do not invent a complete cast or rely on prior knowledge of the book.
+- Set character traits only when supported by the supplied text; otherwise use "unknown". Do not infer an accent from a name.
 - For the author, infer sex/age/country from the name and content; use "unknown" when unclear.
 - chapters: include EVERY chapter index given. narrate=false for: table of contents, appendix, index, acknowledgments/thanks, copyright, dedication, title pages, "also by" pages. narrate=true for: introduction, prologue, epilogue, and all body chapters.`,
     user: `Book: "${meta.title}" by ${meta.author} (language: ${meta.language})
