@@ -11,6 +11,7 @@ function browser() {
     scrollHeight: 0, scrollTop: 0, clientHeight: 0,
     append(child: any) { this.children.push(child); },
     replaceChildren() { this.children = []; },
+    removeAttribute(name: string) { delete (this as any)[name]; },
   });
   const document = {
     querySelector(selector: string) {
@@ -28,6 +29,43 @@ function browser() {
 }
 
 describe('UI stage activity', () => {
+  it('offers a close-task control only while a task is active', () => {
+    const { nodes, context } = browser();
+    context.current = { id: 'activity-1', epubPath: '/book.epub', stage: 'analyze', status: 'running', events: [] };
+    vm.runInContext('renderJob(current)', context);
+    expect(nodes.get('#close-task')).toMatchObject({ hidden: false, textContent: 'Close task' });
+
+    vm.runInContext("current.status='cancelling';renderJob(current)", context);
+    expect(nodes.get('#close-task')).toMatchObject({ hidden: false, disabled: true, textContent: 'Cancelling…' });
+
+    vm.runInContext("current.status='cancelled';renderJob(current)", context);
+    expect(nodes.get('#close-task').hidden).toBe(true);
+  });
+
+  it('shows indeterminate model work, measured audio units, and clears stale percentages for export', () => {
+    const { nodes, context } = browser();
+    context.current = { id: 'activity-1', epubPath: '/book.epub', stage: 'analyze', status: 'running',
+      startedAt: Date.now() - 20000, progressUpdatedAt: Date.now() - 5000, events: [],
+      progress: { activity: 'Analyzing sampled text — waiting for model response', elapsedMs: 15000 } };
+    vm.runInContext('renderJob(current)', context);
+    expect(nodes.get('#progress-title').textContent).toBe('Analyze');
+    expect(nodes.get('#progress-bar').hidden).toBe(false);
+    expect(nodes.get('#progress-bar').value).toBeUndefined();
+    expect(nodes.get('#progress-phase').textContent).toContain('waiting for model response · 20s elapsed');
+    expect(nodes.get('#progress-text').textContent).toBe('');
+    vm.runInContext("current.stage='synth';current.progress={activity:'Synthesizing speech',completedUnits:3,totalUnits:4,unit:'audio segments ready',chapterIndex:2,chapterTitle:'<Alice>',completedChapters:0,totalChapters:2,elapsedMs:15000};renderJob(current)", context);
+    expect(nodes.get('#progress-bar').value).toBe(75);
+    expect(nodes.get('#progress-text').textContent).toBe('3/4 audio segments ready · 75%');
+    expect(nodes.get('#progress-title').textContent).toBe('Chapter 3: <Alice>');
+    expect(nodes.get('#progress-chapters').textContent).toBe('0/2 chapters complete');
+    vm.runInContext("current.stage='assemble';current.progress={activity:'Writing M4B',elapsedMs:15000};renderJob(current)", context);
+    expect(nodes.get('#progress-bar').value).toBeUndefined();
+    expect(nodes.get('#progress-text').textContent).toBe('');
+    expect(nodes.get('#progress-chapters').textContent).toBe('');
+    vm.runInContext("current.status='failed';current.finishedAt=Date.now();renderJob(current)", context);
+    expect(nodes.get('#progress-bar').hidden).toBe(true);
+  });
+
   it('renders live text progress separately from chapter completion and resets it for another job', () => {
     const { nodes, context } = browser();
     const current = { id: 'progress-1', epubPath: '/book.epub', stage: 'script', status: 'running',

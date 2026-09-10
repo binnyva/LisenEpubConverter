@@ -6,6 +6,8 @@ import { getTTSProvider } from '../providers/tts/openai.js';
 import { markdownToSpeakable } from '../epub/markdown.js';
 import { splitSentences } from '../util/text.js';
 import { config } from '../config.js';
+import { reportProgress } from '../util/progress.js';
+import { throwIfTaskCancelled, taskCancellationSignal, waitForRetry } from '../util/cancellation.js';
 import { validateVoiceBindings } from './voices.js';
 import type { WorkDir } from '../state.js';
 import type { BookMetadata, Casting, ChapterAudioManifest, ChapterScript } from '../types.js';
@@ -16,6 +18,8 @@ import type { BookMetadata, Casting, ChapterAudioManifest, ChapterScript } from 
  * crashes never pay for the same audio twice.
  */
 export async function runSynth(work: WorkDir, chapterIndexes?: number[]): Promise<void> {
+  throwIfTaskCancelled();
+  reportProgress({ activity: 'Validating saved voice bindings and preparing speech requests' });
   const casting = work.readJson<Casting>('casting.json');
   const bindings = validateVoiceBindings(work);
   const meta = work.readJson<BookMetadata>('metadata.json');
@@ -41,9 +45,13 @@ export async function runSynth(work: WorkDir, chapterIndexes?: number[]): Promis
 
   let total = 0;
   let cached = 0;
+  let completedChapters = 0;
 
   for (const file of scriptFiles) {
+    throwIfTaskCancelled();
     const script = work.readJson<ChapterScript>(`script/${file}`);
+    const chapterTitle = meta.chapters.find((chapter) => chapter.index === script.index)?.title ?? `Chapter ${script.index}`;
+    reportProgress({ activity: 'Preparing audio segments', chapterIndex: script.index, chapterTitle, completedChapters, totalChapters: scriptFiles.length });
     const manifestFile = `audio/${String(script.index).padStart(2, '0')}-segments.json`;
 
     const pieces: Array<{ hash: string; text: string; voiceId: string; instructions: string }> = [];
@@ -73,17 +81,32 @@ export async function runSynth(work: WorkDir, chapterIndexes?: number[]): Promis
     }
 
     total += pieces.length;
+    let ready = 0;
+    let chapterCached = 0;
+    const progress = (activity: string, phase?: 'saving' | 'completed') => reportProgress({
+      activity, phase, chapterIndex: script.index, chapterTitle,
+      completedChapters, totalChapters: scriptFiles.length,
+      completedUnits: ready, totalUnits: pieces.length, unit: 'audio segments ready',
+    });
+    progress('Synthesizing speech and checking cached audio');
     await Promise.all(
       pieces.map((piece) =>
         limit(async () => {
+          throwIfTaskCancelled();
           const out = `${cacheDir}/${piece.hash}.mp3`;
           if (fs.existsSync(out)) {
             cached++;
+            chapterCached++;
+            ready++;
+            progress(`Preparing audio; ${chapterCached} segment(s) reused from cache`);
             return;
           }
           const audio = await synthesizeWithRetry(provider, piece, languageGuard);
+          throwIfTaskCancelled();
           fs.writeFileSync(out + '.tmp', audio);
           fs.renameSync(out + '.tmp', out);
+          ready++;
+          progress(`Synthesizing speech; ${chapterCached} segment(s) reused from cache`);
         })
       )
     );
@@ -92,11 +115,13 @@ export async function runSynth(work: WorkDir, chapterIndexes?: number[]): Promis
       index: script.index,
       segments: pieces.map((p) => p.hash),
     };
+    progress('Saving chapter audio manifest', 'saving');
     work.writeJson(manifestFile, manifest);
-    console.log(`  Chapter ${script.index}: ${pieces.length} audio segment(s) ready`);
+    completedChapters++;
+    progress(`Chapter audio ready; ${chapterCached} segment(s) reused from cache`, 'completed');
   }
 
-  console.log(`  Synthesized ${total - cached} segment(s), ${cached} from cache.`);
+  reportProgress({ activity: `Synthesized ${total - cached} segment(s), ${cached} from cache`, phase: 'completed', completedUnits: total, totalUnits: total, unit: 'audio segments ready', completedChapters, totalChapters: scriptFiles.length });
 }
 
 async function synthesizeWithRetry(
@@ -111,13 +136,15 @@ async function synthesizeWithRetry(
         text: piece.text,
         voiceId: piece.voiceId,
         instructions: [languageGuard, piece.instructions].filter(Boolean).join(' '),
+        signal: taskCancellationSignal(),
       });
     } catch (err) {
+      throwIfTaskCancelled();
       lastErr = err;
       if (attempt === 4) break;
       const backoff = 2000 * 2 ** (attempt - 1);
       reportWarning(`TTS failed (${(err as Error).message}), retrying in ${backoff / 1000}s...`);
-      await new Promise((r) => setTimeout(r, backoff));
+      await waitForRetry(backoff);
     }
   }
   throw lastErr;

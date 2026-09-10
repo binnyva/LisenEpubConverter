@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import { CharacterRegistrySchema, ChapterCharactersSchema, type Analysis, type BookMetadata, type CharacterRegistry, type ChapterCharacters } from '../types.js';
 import type { WorkDir } from '../state.js';
 import { reportWarning } from '../util/warnings.js';
+import { reportProgress } from '../util/progress.js';
 
 export const CHARACTER_REGISTRY_FILE = 'characters.json';
 export const characterChapterFile = (index: number): string => `chapter-characters/${String(index).padStart(2, '0')}.json`;
@@ -112,15 +113,18 @@ export function runListCharacters(work: WorkDir): CharacterRegistry {
   const analysis = work.readJson<Analysis>('analysis.json');
   const metadata = work.readJson<BookMetadata>('metadata.json');
   const chapters = metadata.chapters.filter((ch) => analysis.chapters.some((p) => p.index === ch.index && p.narrate));
-  const observations = chapters.map((chapter) => {
+  reportProgress({ activity: 'Reading chapter character observations', completedUnits: 0, totalUnits: chapters.length, unit: 'chapters read' });
+  const observations = chapters.map((chapter, position) => {
     const file = characterChapterFile(chapter.index);
     if (!fs.existsSync(work.path(file))) {
       throw new Error(`Character observations are missing for chapter ${chapter.index + 1}. Run chapters to backfill them, then run list-characters.`);
     }
     const result = ChapterCharactersSchema.parse(work.readJson(file));
     if (result.index !== chapter.index) throw new Error(`Chapter index mismatch in ${file}. Rerun chapters for index ${chapter.index}.`);
+    reportProgress({ activity: 'Reading chapter character observations', completedUnits: position + 1, totalUnits: chapters.length, unit: 'chapters read' });
     return result;
   });
+  reportProgress({ activity: 'Merging supported names and aliases into the book character registry' });
   const registry = buildCharacterRegistry(observations);
   if (fs.existsSync(work.path(CHARACTER_REGISTRY_FILE))) {
     const previous = readCharacterRegistry(work);
@@ -139,5 +143,6 @@ export function runListCharacters(work: WorkDir): CharacterRegistry {
   work.writeJson(CHARACTER_REGISTRY_FILE, registry);
   const review = registry.characters.filter((character) => character.issues.length);
   if (review.length) reportWarning(`${review.length} character profile(s) need review in characters.json: ${review.map((c) => c.name).join(', ')}.`);
+  reportProgress({ activity: `Saved ${registry.characters.length} character profiles; ${review.length} need review`, phase: 'completed' });
   return registry;
 }

@@ -56,7 +56,20 @@ npm run dev -- run book.epub extract --rebuild
 
 Run `npm run dev -- ui` and open `http://127.0.0.1:3188`. Use `--port`, `--work`, and `--out` to change the port, work root, and output directory. The server binds to localhost and runs one stage job at a time; provider requests originate from Node using the configured API keys.
 
-The workspace shows the provisional book analysis, discovered characters and registry review issues, chapter readiness, and editable speaker instructions and voice assignments. Select chapters, use **Run** to rerun a stage or **Rebuild all** to clear its derived output, and use **Cmd** to copy the corresponding CLI command. The stage activity panel retains start/completion events, retry warnings, and failures for the displayed job. Saving casting changes makes synthesis and assembly stale while preserving cached MP3s.
+The workspace shows the provisional book analysis, discovered characters and registry review issues, chapter readiness, and editable speaker instructions and voice assignments. Use the settings gear to choose an OpenAI or OpenRouter **text-processing** provider and a model for new Analyze, Chapters, List Characters, Script, and Casting jobs. The model field offers fuzzy-matched suggestions and one-click starred models. Select chapters, use **Run** to rerun a stage or **Rebuild all** to clear its derived output, and use **Cmd** to copy the corresponding CLI command. The stage activity panel retains start/completion events, retry warnings, and failures for the displayed job. Saving casting changes makes synthesis and assembly stale while preserving cached MP3s.
+
+The model list lives in [`library/preferred-models.json`](library/preferred-models.json) and is re-read whenever the settings dialog opens, so it can be edited while the UI server is running:
+
+```json
+{
+  "models": [
+    { "provider": "openai", "model": "gpt-4.1", "starred": true },
+    { "provider": "openrouter", "model": "anthropic/claude-sonnet-4", "starred": false }
+  ]
+}
+```
+
+Set `LISEN_PREFERRED_MODELS_FILE` to use a different list. The UI choice does not change `.env` or CLI defaults, and synthesis continues to use the provider/model saved in `voice-bindings.json`.
 
 EPUBs remain at their original paths. A work folder with a missing source can still be inspected; open the source at its new path with the same filename slug to relink it. Renaming the EPUB changes the slug and selects a different work folder.
 
@@ -75,7 +88,9 @@ npm run dev -- run book.epub script --rebuild  # clear derived output and rerun 
 
 `run` executes exactly one stage and checks prerequisites; it does not run missing earlier stages. `chapters`, `script`, `synth`, and `assemble` accept `--chapters` using zero-based EPUB chapter indexes (the UI displays chapter numbers starting at 1). Selected assembly creates a separate file such as `Book Title - chapters 3-4.m4b` and does not mark full-book assembly complete. `books`, `status`, and `run` support `--json`; stage code may still emit progress or warnings during `run --json`.
 
-Script reports each attribution block, the percentage of chapter text processed, speaker verification, and completed chapters in both CLI output and the UI’s Stage activity panel. Long requests print an elapsed-time update every 10 seconds; the UI updates elapsed time while polling. Percentages measure text processed, not time remaining, and verification must finish before the chapter is complete. UI progress tracks jobs started in that UI server; separate CLI runs are not attached to it.
+All stages report activity in the CLI and the UI’s Stage activity panel. Analyze and Casting show preparation, a waiting indicator during their single model request, and saving. Chapters and Script show text processed by block and completed chapter counts. Synth shows audio segments ready, including cache hits. Assembly shows encoded chapters, duration reads, joining, and M4B export; ffmpeg runs asynchronously so the UI stays responsive. Extract, List Characters, and Voices report local-work milestones and counts. Short local stages may finish between UI polls; their milestones remain in the activity log.
+
+Long-running activities print elapsed-time updates every 10 seconds; the UI updates elapsed time while polling and uses an indeterminate bar when there is no measurable percentage. Percentages describe the current activity’s units, not time remaining or full-stage completion (for example, encoding can reach 100% before M4B export). UI progress tracks jobs started in that UI server; separate CLI runs are not attached to it.
 
 List Characters requires all narratable chapters and does not accept `--chapters`. For an older work folder, run `chapters` without `--rerun` to backfill missing character observations while retaining cleaned text and summaries (billable LLM discovery for fiction), then run `list-characters`. Script regenerates chapter scripts when their registry hash changes. A changed registry also clears derived audio manifests and encoded M4As so assembly cannot reuse old speaker assignments; paid MP3 caches and exported books remain. If Script reports new speakers, review `character-candidates/`, add supported identities or aliases to the corresponding `chapter-characters/` file, and rerun `list-characters --rerun`, then Script.
 
@@ -114,9 +129,15 @@ Environment variables (see `src/config.ts` for defaults):
 - `LISEN_CHAPTER_MODEL` — model for per-chapter work (default `gpt-4.1-mini`)
 - `LISEN_TTS_MODEL` — default TTS target (`gpt-4o-mini-tts` for OpenAI; `openai/gpt-4o-mini-tts-2025-12-15` for OpenRouter)
 - `LISEN_LLM_PROVIDER` — text-processing provider: `openai` or `openrouter` (default `openai`)
+- `LISEN_LLM_RESPONSE_TIMEOUT_MS` — maximum wait for each text-model response before retrying (default `120000`)
+- `LISEN_LLM_MAX_COMPLETION_TOKENS` — maximum tokens requested for each structured text-model response (default `4096`)
+- `LISEN_PREFERRED_MODELS_FILE` — editable UI model list (default `./library/preferred-models.json`)
 - `LISEN_TTS_PROVIDER` — TTS provider: `openai` or `openrouter` (default `openai`)
 - `LISEN_OPENROUTER_BASE_URL` — OpenRouter API base URL (default `https://openrouter.ai/api/v1`)
 - `LISEN_OPENROUTER_SITE_URL` — optional application URL sent to OpenRouter for attribution
+- `LISEN_OPENROUTER_MAX_PRICE` — optional JSON price caps for OpenRouter text routing, in US dollars per million tokens; for example `{"prompt":0.10,"completion":0.40}`
+- `LISEN_OPENROUTER_TRACE_FILE` — optional local JSONL trace of full OpenRouter LLM requests and raw responses; contains book text and generated prose, never API keys
+- `LISEN_OPENROUTER_REASONING_EFFORT` — OpenRouter reasoning budget for text processing (default `none`; allowed: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`)
 - `LISEN_TTS_MAX_CHARS` — maximum characters in one TTS request (default `4000`)
 - `LISEN_TTS_VOICES_FILE` — JSON catalogue of voices for a non-OpenAI OpenRouter speech model
 - `LISEN_VOICE_LIBRARY_FILE` — shared model and voice library path (default `./library/voices.json`, relative to the current directory)
@@ -132,6 +153,8 @@ OPENROUTER_API_KEY=sk-or-...
 LISEN_LLM_PROVIDER=openrouter
 LISEN_ANALYSIS_MODEL=anthropic/claude-sonnet-4
 LISEN_CHAPTER_MODEL=google/gemini-2.5-flash
+# Never route an LLM request above these per-million-token prices:
+LISEN_OPENROUTER_MAX_PRICE={"prompt":0.10,"completion":0.40}
 LISEN_TTS_PROVIDER=openrouter
 LISEN_TTS_MODEL=openai/gpt-4o-mini-tts-2025-12-15
 ```

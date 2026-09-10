@@ -2,12 +2,12 @@ import fs from 'node:fs';
 import http, { type IncomingMessage, type ServerResponse } from 'node:http';
 import path from 'node:path';
 import { URL } from 'node:url';
-import { STAGES, type Stage } from '../config.js';
+import { STAGES, type ProviderId, type Stage } from '../config.js';
 import { CastingSchema, VoiceBindingsSchema, type Analysis, type BookMetadata, type Casting, type VoiceBindings, type CharacterRegistry, type ChapterCharacters } from '../types.js';
 import { clearArtifactsFrom, discoverBooks, recoverStageStateFromArtifacts, runStage, type PipelineEvent } from '../pipeline/runner.js';
 import { WorkDir, type WorkState } from '../state.js';
 import { loadVoiceLibrary } from '../voices/library.js';
-import type { ChapterProgress } from '../util/progress.js';
+import { defaultLlmSettings, loadPreferredModels, preferredModelsFile } from './models.js';
 
 interface UiOptions {
   workRoot: string;
@@ -17,16 +17,17 @@ interface UiOptions {
 
 interface LocalJob {
   id: string;
-  status: 'running' | 'completed' | 'failed';
+  status: 'running' | 'cancelling' | 'cancelled' | 'completed' | 'failed';
   stage: Stage;
   epubPath: string;
   events: PipelineEvent[];
   startedAt: number;
   finishedAt?: number;
-  progress?: ChapterProgress;
+  progress?: PipelineEvent['progress'];
   progressUpdatedAt?: number;
   output?: string;
   error?: string;
+  llm?: { provider: ProviderId; model: string };
 }
 
 const JSON_LIMIT = 1_000_000;
@@ -34,6 +35,7 @@ const JSON_LIMIT = 1_000_000;
 /** A deliberately local UI: provider credentials and filesystem access stay in Node, never the browser. */
 export async function startLocalUi(options: UiOptions): Promise<string> {
   const jobs = new Map<string, LocalJob>();
+  const jobControllers = new Map<string, AbortController>();
   let activeJob: LocalJob | undefined;
   const workRoot = path.resolve(options.workRoot);
   const outDir = path.resolve(options.outDir);
@@ -57,26 +59,44 @@ export async function startLocalUi(options: UiOptions): Promise<string> {
           return json(response, 200, []);
         }
       }
+      if (request.method === 'GET' && url.pathname === '/api/settings') {
+        return json(response, 200, { ...defaultLlmSettings(), models: loadPreferredModels(), modelsFile: preferredModelsFile });
+      }
       if (request.method === 'GET' && url.pathname === '/api/job') {
         const id = url.searchParams.get('id');
         const job = id ? jobs.get(id) : undefined;
         if (!job) return json(response, 404, { error: 'Job not found.' });
         return json(response, 200, job);
       }
+      if (request.method === 'POST' && url.pathname === '/api/job/cancel') {
+        const body = await bodyJson<{ id?: string }>(request);
+        const job = body.id ? jobs.get(body.id) : undefined;
+        const controller = body.id ? jobControllers.get(body.id) : undefined;
+        if (!job || !controller) return json(response, 404, { error: 'Job not found.' });
+        if (job.status !== 'running') return json(response, 409, { error: 'Task is no longer running.' });
+        job.status = 'cancelling';
+        job.events.push({ type: 'warning', stage: job.stage, message: 'Cancellation requested…' });
+        controller.abort();
+        return json(response, 202, job);
+      }
       if (request.method === 'POST' && url.pathname === '/api/books/open') {
         const body = await bodyJson<{ epub?: string; root?: string }>(request);
         return json(response, 200, withUiPaths(body.root ? bookDetailFromRoot(body.root, workRoot) : bookDetail(requireEpub(body.epub), workRoot)));
       }
       if (request.method === 'POST' && url.pathname === '/api/run') {
-        if (activeJob?.status === 'running') return json(response, 409, { error: `A ${activeJob.stage} job is already running.` });
-        const body = await bodyJson<{ epub?: string; stage?: Stage; chapters?: number[]; rerun?: boolean; rebuild?: boolean }>(request);
+        if (activeJob) return json(response, 409, { error: `A ${activeJob.stage} job is already running.` });
+        const body = await bodyJson<{ epub?: string; stage?: Stage; chapters?: number[]; rerun?: boolean; rebuild?: boolean; llm?: { provider?: string; model?: string } }>(request);
         const epubPath = requireEpub(body.epub);
         if (!body.stage || !STAGES.includes(body.stage)) return json(response, 400, { error: 'Invalid stage.' });
+        const llm = parseLlmSettings(body.llm);
         const job: LocalJob = {
           id: crypto.randomUUID(), status: 'running', stage: body.stage, epubPath, events: [], startedAt: Date.now(),
+          llm,
         };
         activeJob = job;
         jobs.set(job.id, job);
+        const controller = new AbortController();
+        jobControllers.set(job.id, controller);
         void runStage({
           epubPath,
           workRoot,
@@ -85,6 +105,9 @@ export async function startLocalUi(options: UiOptions): Promise<string> {
           chapterIndexes: body.chapters,
           rerun: body.rerun,
           rebuild: body.rebuild,
+          llmProvider: llm.provider,
+          llmModel: llm.model,
+          signal: controller.signal,
           onEvent: (event) => {
             if (event.progress) {
               job.progress = event.progress;
@@ -94,13 +117,24 @@ export async function startLocalUi(options: UiOptions): Promise<string> {
             if (event.type === 'warning') console.warn(`  ${event.message}`);
           },
         }).then((result) => {
-          job.status = 'completed';
-          job.output = result.output;
+          if (controller.signal.aborted) {
+            job.status = 'cancelled';
+            job.events.push({ type: 'warning', stage: job.stage, message: 'Task cancelled by user.' });
+          } else {
+            job.status = 'completed';
+            job.output = result.output;
+          }
         }).catch((error: unknown) => {
-          job.status = 'failed';
-          job.error = error instanceof Error ? error.message : String(error);
+          if (controller.signal.aborted) {
+            job.status = 'cancelled';
+            job.events.push({ type: 'warning', stage: job.stage, message: 'Task cancelled by user.' });
+          } else {
+            job.status = 'failed';
+            job.error = error instanceof Error ? error.message : String(error);
+          }
         }).finally(() => {
           job.finishedAt = Date.now();
+          jobControllers.delete(job.id);
           activeJob = undefined;
         });
         return json(response, 202, job);
@@ -197,6 +231,16 @@ function readJson<T>(file: string): T | undefined {
   return JSON.parse(fs.readFileSync(file, 'utf8')) as T;
 }
 
+function parseLlmSettings(value?: { provider?: string; model?: string }): { provider: ProviderId; model: string } {
+  const fallback = defaultLlmSettings();
+  const provider = value?.provider ?? fallback.provider;
+  if (provider !== 'openai' && provider !== 'openrouter') throw new Error('Text provider must be "openai" or "openrouter".');
+  const model = value?.model?.trim() ?? fallback.model;
+  if (!model) throw new Error('Enter a text-processing model name.');
+  if (model.length > 200) throw new Error('Text-processing model names must be 200 characters or fewer.');
+  return { provider, model };
+}
+
 async function bodyJson<T>(request: IncomingMessage): Promise<T> {
   let size = 0;
   const parts: Buffer[] = [];
@@ -222,13 +266,17 @@ function html(response: ServerResponse): void {
 const PAGE = String.raw`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Lisen — audiobook workspace</title><style>
-:root{color-scheme:dark;font-family:ui-rounded,"SF Pro Rounded",system-ui,sans-serif;background:#101725;color:#eaf0ff}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 0 0,#243667,transparent 38rem),#101725;min-height:100vh}.shell{max-width:1280px;margin:auto;padding:38px 24px 80px}header{display:flex;justify-content:space-between;align-items:end;margin-bottom:32px}.eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.16em;color:#9eb1df;margin:0 0 8px}h1{margin:0;font-size:2.4rem;letter-spacing:-.06em}h2{font-size:1.1rem;margin:0 0 14px}h3{font-size:.9rem;margin:0}.subtle{color:#aebbd9;font-size:.9rem}.panel{background:rgba(20,30,51,.82);border:1px solid #304267;border-radius:18px;padding:20px;box-shadow:0 20px 55px #070b1526}.open{display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:20px}input,textarea,select,button{font:inherit}input,textarea{border:1px solid #40547d;background:#101a30;color:#edf3ff;border-radius:9px;padding:10px 12px}button{border:0;border-radius:9px;background:#89f0cb;color:#08231e;font-weight:750;padding:10px 14px;cursor:pointer}button:hover{filter:brightness(1.06)}button:disabled{cursor:not-allowed;opacity:.45}.quiet{background:#263754;color:#dfebff}.danger{background:#6d3c53;color:#ffe6ee}.books{display:flex;gap:9px;flex-wrap:wrap}.book{background:#192742;color:#dce9ff;border:1px solid #3c5075}.book.missing{border-color:#a65b70;color:#f1b9c7}.book.active{outline:2px solid #89f0cb}.workspace{display:grid;grid-template-columns:minmax(420px,1.35fr) minmax(280px,.65fr);gap:20px;margin-top:20px}.stages{display:grid;gap:9px}.stage{display:grid;grid-template-columns:12px 1fr auto;gap:12px;align-items:center;padding:13px 14px;background:#15213a;border:1px solid #2c3d61;border-radius:12px}.dot{width:10px;height:10px;border-radius:50%;background:#576984}.dot.done{background:#89f0cb}.dot.stale{background:#f3bd63}.dot.running{background:#91b9ff;animation:pulse 1s infinite}.stage-name{text-transform:capitalize;font-weight:700}.stage-meta{font-size:.77rem;color:#a6b7d9;margin-top:2px}.actions{display:flex;gap:6px}.actions button{padding:7px 10px;font-size:.78rem}.chapter-tools{display:flex;gap:8px;align-items:center;margin:18px 0 10px}.chapter-list{max-height:430px;overflow:auto;border-top:1px solid #2d3c5e}.chapter{display:grid;grid-template-columns:auto 34px 1fr auto;gap:9px;align-items:center;padding:9px 2px;border-bottom:1px solid #263653;font-size:.86rem}.chapter.skip{opacity:.48}.badges{display:flex;gap:4px}.badge{font-size:.66rem;border:1px solid #40547d;color:#bcd1f6;border-radius:99px;padding:2px 5px}.badge.ready{border-color:#3c8f77;color:#9ff1d2}.detail{display:grid;gap:20px}.json{margin:0;max-height:210px;overflow:auto;background:#0e172a;color:#c9d9ff;border-radius:10px;padding:13px;font:12px ui-monospace,SFMono-Regular,monospace;white-space:pre-wrap}.cast{display:grid;gap:9px}.voice-row{display:grid;grid-template-columns:110px 1fr 1.5fr;gap:7px;align-items:center}.voice-row label{font-size:.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.voice-row select,.voice-row input{min-width:0;padding:8px}.toast{position:fixed;right:22px;bottom:22px;z-index:10;max-width:min(420px,calc(100vw - 44px));padding:13px 16px;border:1px solid #41577f;border-radius:12px;background:#283a5e;color:#e2ecff;font-size:.9rem;box-shadow:0 16px 42px #0509138c;opacity:0;transform:translateY(14px);pointer-events:none;transition:opacity .18s ease,transform .18s ease}.toast.visible{opacity:1;transform:translateY(0);pointer-events:auto}.toast.success{background:#173d36;border-color:#3d927a;color:#c3f9e3}.toast.error{background:#563145;border-color:#9e5e72;color:#ffe1e9}.toast.progress{background:#263b64;border-color:#6585be;color:#d9e7ff}dialog{width:min(680px,calc(100vw - 32px));border:1px solid #49618e;border-radius:16px;background:#17233c;color:#edf3ff;box-shadow:0 30px 90px #050913b3;padding:22px}dialog::backdrop{background:#050913aa}.dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.command{margin:0;overflow:auto;border:1px solid #3c5177;border-radius:9px;background:#0d1628;padding:13px;color:#cbdaff;font:13px ui-monospace,SFMono-Regular,monospace;white-space:pre-wrap;word-break:break-word}@keyframes pulse{50%{opacity:.35}}@media(max-width:850px){.workspace{grid-template-columns:1fr}.shell{padding:22px 14px}header{align-items:start;flex-direction:column;gap:9px}.open{grid-template-columns:1fr}.voice-row{grid-template-columns:1fr}}
-.activity{margin-top:20px}.activity-log{max-height:260px;overflow:auto;display:grid;gap:8px}.activity-event{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem;color:#bcd1f6}.activity-event.warning{color:#f3bd63}.activity-event.error{color:#ffb6c9}
+:root{color-scheme:dark;font-family:ui-rounded,"SF Pro Rounded",system-ui,sans-serif;background:#101725;color:#eaf0ff}*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 0 0,#243667,transparent 38rem),#101725;min-height:100vh}.shell{max-width:1280px;margin:auto;padding:38px 24px 80px}header{display:flex;justify-content:space-between;align-items:end;margin-bottom:32px}.header-actions{display:flex;align-items:center;gap:12px}.eyebrow{font-size:.72rem;text-transform:uppercase;letter-spacing:.16em;color:#9eb1df;margin:0 0 8px}h1{margin:0;font-size:2.4rem;letter-spacing:-.06em}h2{font-size:1.1rem;margin:0 0 14px}h3{font-size:.9rem;margin:0}.subtle{color:#aebbd9;font-size:.9rem}.panel{background:rgba(20,30,51,.82);border:1px solid #304267;border-radius:18px;padding:20px;box-shadow:0 20px 55px #070b1526}.open{display:grid;grid-template-columns:1fr auto;gap:10px;margin-bottom:20px}input,textarea,select,button{font:inherit}input,textarea,select{border:1px solid #40547d;background:#101a30;color:#edf3ff;border-radius:9px;padding:10px 12px}button{border:0;border-radius:9px;background:#89f0cb;color:#08231e;font-weight:750;padding:10px 14px;cursor:pointer}button:hover{filter:brightness(1.06)}button:disabled{cursor:not-allowed;opacity:.45}.quiet{background:#263754;color:#dfebff}.danger{background:#6d3c53;color:#ffe6ee}.icon{font-size:1.2rem;line-height:1;padding:9px 11px}.books{display:flex;gap:9px;flex-wrap:wrap}.book{background:#192742;color:#dce9ff;border:1px solid #3c5075}.book.missing{border-color:#a65b70;color:#f1b9c7}.book.active{outline:2px solid #89f0cb}.workspace{display:grid;grid-template-columns:minmax(420px,1.35fr) minmax(280px,.65fr);gap:20px;margin-top:20px}.stages{display:grid;gap:9px}.stage{display:grid;grid-template-columns:12px 1fr auto;gap:12px;align-items:center;padding:13px 14px;background:#15213a;border:1px solid #2c3d61;border-radius:12px}.dot{width:10px;height:10px;border-radius:50%;background:#576984}.dot.done{background:#89f0cb}.dot.stale{background:#f3bd63}.dot.running{background:#91b9ff;animation:pulse 1s infinite}.stage-name{text-transform:capitalize;font-weight:700}.stage-meta{font-size:.77rem;color:#a6b7d9;margin-top:2px}.actions{display:flex;gap:6px}.actions button{padding:7px 10px;font-size:.78rem}.chapter-tools{display:flex;gap:8px;align-items:center;margin:18px 0 10px}.chapter-list{max-height:430px;overflow:auto;border-top:1px solid #2d3c5e}.chapter{display:grid;grid-template-columns:auto 34px 1fr auto;gap:9px;align-items:center;padding:9px 2px;border-bottom:1px solid #263653;font-size:.86rem}.chapter.skip{opacity:.48}.badges{display:flex;gap:4px}.badge{font-size:.66rem;border:1px solid #40547d;color:#bcd1f6;border-radius:99px;padding:2px 5px}.badge.ready{border-color:#3c8f77;color:#9ff1d2}.detail{display:grid;gap:20px}.json{margin:0;max-height:210px;overflow:auto;background:#0e172a;color:#c9d9ff;border-radius:10px;padding:13px;font:12px ui-monospace,SFMono-Regular,monospace;white-space:pre-wrap}.cast{display:grid;gap:9px}.voice-row{display:grid;grid-template-columns:110px 1fr 1.5fr;gap:7px;align-items:center}.voice-row label{font-size:.8rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.voice-row select,.voice-row input{min-width:0;padding:8px}.toast{position:fixed;right:22px;bottom:22px;z-index:10;max-width:min(420px,calc(100vw - 44px));padding:13px 16px;border:1px solid #41577f;border-radius:12px;background:#283a5e;color:#e2ecff;font-size:.9rem;box-shadow:0 16px 42px #0509138c;opacity:0;transform:translateY(14px);pointer-events:none;transition:opacity .18s ease,transform .18s ease}.toast.visible{opacity:1;transform:translateY(0);pointer-events:auto}.toast.success{background:#173d36;border-color:#3d927a;color:#c3f9e3}.toast.error{background:#563145;border-color:#9e5e72;color:#ffe1e9}.toast.progress{background:#263b64;border-color:#6585be;color:#d9e7ff}dialog{width:min(680px,calc(100vw - 32px));border:1px solid #49618e;border-radius:16px;background:#17233c;color:#edf3ff;box-shadow:0 30px 90px #050913b3;padding:22px}dialog::backdrop{background:#050913aa}.dialog-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}.command{margin:0;overflow:auto;border:1px solid #3c5177;border-radius:9px;background:#0d1628;padding:13px;color:#cbdaff;font:13px ui-monospace,SFMono-Regular,monospace;white-space:pre-wrap;word-break:break-word}.settings-grid{display:grid;gap:14px}.settings-grid label{display:grid;gap:6px;font-size:.86rem;font-weight:700}.model-picker{position:relative}.suggestions{position:absolute;z-index:2;left:0;right:0;top:calc(100% + 4px);max-height:180px;overflow:auto;border:1px solid #49618e;border-radius:9px;background:#101a30;box-shadow:0 14px 32px #050913aa}.suggestions:empty{display:none}.suggestion{display:block;width:100%;border-radius:0;text-align:left;background:transparent;color:#dce9ff;padding:9px 12px;font-weight:500}.suggestion:hover{background:#263b5e}.starred-models{display:flex;gap:7px;flex-wrap:wrap}.starred-models button{padding:6px 9px;font-size:.8rem}.settings-file{overflow-wrap:anywhere;font-size:.78rem}@keyframes pulse{50%{opacity:.35}}@media(max-width:850px){.workspace{grid-template-columns:1fr}.shell{padding:22px 14px}header{align-items:start;flex-direction:column;gap:9px}.open{grid-template-columns:1fr}.voice-row{grid-template-columns:1fr}}
+.activity{margin-top:20px}.activity-header{display:flex;justify-content:space-between;align-items:start;gap:12px}.activity-header h2{margin-bottom:14px}.activity-header button{padding:7px 10px;font-size:.8rem}.activity-log{max-height:260px;overflow:auto;display:grid;gap:8px}.activity-event{margin:0;white-space:pre-wrap;overflow-wrap:anywhere;font-size:.85rem;color:#bcd1f6}.activity-event.warning{color:#f3bd63}.activity-event.error{color:#ffb6c9}
 .chapter-progress{margin-bottom:16px;padding:14px;background:#101a30;border-radius:10px}.chapter-progress p{margin:6px 0}.chapter-progress progress{width:100%;height:14px;accent-color:#89f0cb}
-</style></head><body><main class="shell"><header><div><p class="eyebrow">Local audiobook production</p><h1>Lisen workspace</h1></div><p class="subtle">Files and API keys stay on this machine.</p></header><section class="panel"><form class="open" id="open-form"><input id="epub" placeholder="/full/path/to/book.epub" aria-label="EPUB path" required><button>Open EPUB</button></form><div id="books" class="books"></div></section><section id="activity" class="panel activity" hidden aria-labelledby="activity-title"><h2 id="activity-title">Stage activity</h2><p id="activity-status" class="subtle" role="status"></p><div id="chapter-progress" class="chapter-progress" hidden><h3 id="progress-title"></h3><p id="progress-phase" class="subtle" role="status"></p><progress id="progress-bar" max="100" value="0" aria-label="Chapter text processed"></progress><p id="progress-text" class="subtle"></p><p id="progress-chapters" class="subtle"></p></div><div id="activity-log" class="activity-log" role="log" aria-live="polite" aria-relevant="additions"></div></section><section id="workspace" class="workspace" hidden><div class="panel"><h2 id="book-title">Pipeline</h2><div id="stages" class="stages"></div><div id="chapter-area" hidden><div class="chapter-tools"><button class="quiet" id="select-all">Select narratable</button><button class="quiet" id="clear-selection">Clear</button><span class="subtle" id="selected-count"></span></div><div id="chapters" class="chapter-list"></div></div></div><aside class="detail"><div class="panel"><h2>Book analysis</h2><p class="subtle">Sampled overview; character candidates are provisional.</p><pre class="json" id="analysis"></pre></div><div class="panel"><h2>Characters</h2><p class="subtle" id="character-status"></p><div id="characters"></div></div><div class="panel"><h2>Voice casting</h2><p class="subtle">Saving changes makes synthesis and assembly stale.</p><form class="cast" id="casting"></form><button id="save-casting">Save casting</button></div></aside></section></main><dialog id="cmd-dialog" aria-labelledby="cmd-title"><h2 id="cmd-title">Run from the command line</h2><pre id="cmd-text" class="command"></pre><div class="dialog-actions"><button class="quiet" id="close-cmd">Close</button><button id="copy-cmd">Copy command</button></div></dialog><div id="toast" class="toast" role="status" aria-live="polite"></div><script>
-const stages=['extract','analyze','chapters','list-characters','script','casting','voices','synth','assemble'];let book=null,voices=[],selected=new Set(),job=null,toastTimer=null,activityJobId=null,activityEventCount=0,activityError=null;
+</style></head><body><main class="shell"><header><div><p class="eyebrow">Local audiobook production</p><h1>Lisen workspace</h1></div><div class="header-actions"><p class="subtle">Files and API keys stay on this machine.</p><button class="quiet icon" id="open-settings" aria-label="Text model settings" title="Text model settings">&#9881;</button></div></header><section class="panel"><form class="open" id="open-form"><input id="epub" placeholder="/full/path/to/book.epub" aria-label="EPUB path" required><button>Open EPUB</button></form><div id="books" class="books"></div></section><section id="activity" class="panel activity" hidden aria-labelledby="activity-title"><h2 id="activity-title">Stage activity</h2><p id="activity-status" class="subtle" role="status"></p><div id="chapter-progress" class="chapter-progress" hidden><h3 id="progress-title"></h3><p id="progress-phase" class="subtle" role="status"></p><progress id="progress-bar" max="100" value="0" aria-label="Current activity progress"></progress><p id="progress-text" class="subtle"></p><p id="progress-chapters" class="subtle"></p></div><div id="activity-log" class="activity-log" role="log" aria-live="polite" aria-relevant="additions"></div></section><section id="workspace" class="workspace" hidden><div class="panel"><h2 id="book-title">Pipeline</h2><div id="stages" class="stages"></div><div id="chapter-area" hidden><div class="chapter-tools"><button class="quiet" id="select-all">Select narratable</button><button class="quiet" id="clear-selection">Clear</button><span class="subtle" id="selected-count"></span></div><div id="chapters" class="chapter-list"></div></div></div><aside class="detail"><div class="panel"><h2>Book analysis</h2><p class="subtle">Sampled overview; character candidates are provisional.</p><pre class="json" id="analysis"></pre></div><div class="panel"><h2>Characters</h2><p class="subtle" id="character-status"></p><div id="characters"></div></div><div class="panel"><h2>Voice casting</h2><p class="subtle">Saving changes makes synthesis and assembly stale.</p><form class="cast" id="casting"></form><button id="save-casting">Save casting</button></div></aside></section></main><dialog id="settings-dialog" aria-labelledby="settings-title"><h2 id="settings-title">Text model settings</h2><p class="subtle">Used for Analyze, Chapters, List Characters, Script, and Casting. Synthesis continues to use the saved voice binding.</p><div class="settings-grid"><label>Provider<select id="llm-provider" aria-label="Text provider"><option value="openai">OpenAI</option><option value="openrouter">OpenRouter</option></select></label><label>Model<div class="model-picker"><input id="llm-model" autocomplete="off" spellcheck="false" aria-autocomplete="list" aria-controls="model-suggestions" placeholder="Enter a model name"><div id="model-suggestions" class="suggestions" role="listbox"></div></div></label><div><h3>Starred models</h3><div id="starred-models" class="starred-models"></div></div><p class="subtle settings-file">Edit <code id="models-file"></code> to add models or set <code>starred</code> to true.</p></div><div class="dialog-actions"><button class="quiet" id="close-settings">Close</button><button id="apply-settings">Use for new runs</button></div></dialog><dialog id="cmd-dialog" aria-labelledby="cmd-title"><h2 id="cmd-title">Run from the command line</h2><pre id="cmd-text" class="command"></pre><div class="dialog-actions"><button class="quiet" id="close-cmd">Close</button><button id="copy-cmd">Copy command</button></div></dialog><div id="toast" class="toast" role="status" aria-live="polite"></div><script>
+const stages=['extract','analyze','chapters','list-characters','script','casting','voices','synth','assemble'];let book=null,voices=[],selected=new Set(),job=null,toastTimer=null,activityJobId=null,activityEventCount=0,activityError=null,modelSettings=null,activeLlm=null;
 const $=s=>document.querySelector(s);const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function api(url,opts){const r=await fetch(url,opts);const data=await r.json();if(!r.ok)throw Error(data.error||'Request failed.');return data}
+function fuzzyScore(value,query){const hay=value.toLowerCase(),needle=query.trim().toLowerCase();if(!needle)return 0;let at=0,score=0;for(const char of needle){const found=hay.indexOf(char,at);if(found<0)return -1;score+=found-at;at=found+1}return score+(hay.startsWith(needle)?-100:0)}
+function selectedLlm(){return activeLlm||(modelSettings?{provider:modelSettings.provider,model:modelSettings.model}:null)}
+function renderModelSettings(){if(!modelSettings)return;const current=selectedLlm();const provider=$('#llm-provider'),input=$('#llm-model');provider.value=current.provider;input.value=current.model;$('#models-file').textContent=modelSettings.modelsFile;renderModelChoices()}
+function renderModelChoices(){if(!modelSettings)return;const provider=$('#llm-provider').value,query=$('#llm-model').value;const matches=modelSettings.models.filter(m=>m.provider===provider).map(m=>({...m,score:fuzzyScore(m.model,query)})).filter(m=>m.score>=0).sort((a,b)=>a.score-b.score||a.model.localeCompare(b.model));$('#model-suggestions').innerHTML=matches.slice(0,8).map(m=>'<button class="suggestion" role="option" data-model-choice="'+esc(m.model)+'">'+esc(m.model)+'</button>').join('');document.querySelectorAll('[data-model-choice]').forEach(x=>x.onclick=()=>{ $('#llm-model').value=x.dataset.modelChoice;renderModelChoices();$('#llm-model').focus() });const starred=modelSettings.models.filter(m=>m.provider===provider&&m.starred);$('#starred-models').innerHTML=starred.length?starred.map(m=>'<button class="quiet" data-model-choice="'+esc(m.model)+'">&#9733; '+esc(m.model)+'</button>').join(''):'<p class="subtle">No starred '+esc(provider)+' models yet.</p>';document.querySelectorAll('#starred-models [data-model-choice]').forEach(x=>x.onclick=()=>{ $('#llm-model').value=x.dataset.modelChoice;renderModelChoices() })}
 function notice(message,kind=''){const toast=$('#toast');clearTimeout(toastTimer);toast.textContent=message||'';toast.className='toast '+(message?'visible ':'')+kind;if(message&&kind!=='progress')toastTimer=setTimeout(()=>{toast.className='toast';},5500)}
 async function refreshBooks(){const books=await api('/api/books');$('#books').innerHTML=books.length?books.map(b=>'<button class="book '+(!b.epubAvailable?'missing ':'')+(book&&b.root===book.root?'active':'')+'" data-root="'+esc(b.root)+'">'+esc(b.epubPath.split('/').pop())+(b.epubAvailable?'':' · source missing')+'</button>').join(''):'<span class="subtle">No existing work folders yet.</span>';document.querySelectorAll('[data-root]').forEach(x=>x.onclick=()=>openExisting(x.dataset.root));}
 async function openBook(epub){try{book=await api('/api/books/open',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({epub})});selected=new Set();$('#workspace').hidden=false;$('#epub').value=book.epubPath;notice(book.state.sourceChanged?'This EPUB differs from the source used for the existing artifacts. Rebuild Extract before running later stages.':'',book.state.sourceChanged?'error':'');render();refreshBooks()}catch(e){notice(e.message,'error')}}
@@ -240,8 +288,15 @@ function stageHint(stage,state){const descriptions={extract:'Read the EPUB into 
 function renderChapters(){const has=book.chapters.length>0;$('#chapter-area').hidden=!has;if(!has)return;$('#selected-count').textContent=selected.size?selected.size+' selected':'';$('#chapters').innerHTML=book.chapters.map(c=>'<label class="chapter '+(!c.narrate?'skip':'')+'"><input type="checkbox" data-chapter="'+c.index+'" '+(!c.narrate?'disabled ':'')+(selected.has(c.index)?'checked':'')+'><span>'+String(c.index+1).padStart(2,'0')+'</span><span>'+esc(c.title)+'</span><span class="badges">'+(c.narrate?'<i class="badge">narrate</i>':'<i class="badge">skip</i>')+(c.cleaned?'<i class="badge ready">clean</i>':'')+(c.scripted?'<i class="badge ready">script</i>':'')+(c.synthesized?'<i class="badge ready">audio</i>':'')+'</span></label>').join('');document.querySelectorAll('[data-chapter]').forEach(x=>x.onchange=()=>{x.checked?selected.add(+x.dataset.chapter):selected.delete(+x.dataset.chapter);render()})}
 function renderCharacters(){const observations=book.characterObservations||[],ready=book.state.completed['list-characters'];const registry=book.characterRegistry;$('#character-status').textContent=ready?'Book character registry · '+(registry?.characters.length||0)+' characters':observations.length+' chapters scanned · '+(registry?'Registry needs a fresh List Characters run.':'Run List Characters after all narratable chapters are processed.');const entries=ready&&registry?registry.characters:observations.flatMap(ch=>ch.observations.map(c=>({...c,chapters:[ch.index],issues:c.confidence==='low'?['Needs review']:[]})));$('#characters').innerHTML=entries.length?entries.map(c=>'<details><summary>'+esc(c.name)+' <span class="subtle">· chapters '+c.chapters.map(i=>i+1).join(', ')+'</span></summary><p class="subtle">'+esc(c.aliases.length?'Aliases: '+c.aliases.join(', '):'No known aliases')+'</p><p class="subtle">'+esc([c.sex,c.age,c.country].join(' · '))+'</p>'+(c.issues||[]).map(issue=>'<p class="activity-event warning">'+esc(issue)+'</p>').join('')+'<pre class="json">'+esc(typeof c.evidence==='string'?c.evidence:JSON.stringify(c.evidence,null,2))+'</pre></details>').join(''):'<p class="subtle">No speaking characters discovered.</p>'}
 function renderCasting(){const form=$('#casting');if(!book.casting){form.innerHTML='<p class="subtle">Run Casting after at least one scripted chapter.</p>';return}const assignments=[['narrator',book.casting.narrator],...Object.entries(book.casting.characters)];form.innerHTML=assignments.map(([name,a])=>{const binding=name==='narrator'?book.bindings?.narrator:book.bindings?.characters?.[name];const label=a.voiceProfile.presentation+' · '+a.voiceProfile.age+(a.voiceProfile.tone.length?' · '+a.voiceProfile.tone.join(', '):'');return '<div class="voice-row"><label title="'+esc(name)+'">'+esc(name)+'<br><small>'+esc(label)+'</small></label><select data-voice="'+esc(name)+'" '+(!book.bindings?'disabled':'')+'><option value="">'+(book.bindings?'Choose voice':'Run Voices first')+'</option>'+voices.filter(v=>!book.bindings||v.models.includes(book.bindings.target.provider+':'+book.bindings.target.model)).map(v=>'<option value="'+esc(v.id)+'" '+(v.id===binding?.libraryVoiceId?'selected':'')+'>'+esc(v.id)+'</option>').join('')+'</select><input data-instructions="'+esc(name)+'" value="'+esc(a.instructions)+'" aria-label="Instructions for '+esc(name)+'"></div>'}).join('')}
-async function run(stage,rebuild){if(stage==='synth'&&!confirm('Synthesis sends the selected text to your configured TTS provider and may incur charges. Continue?'))return;try{const chapters=!rebuild&&['chapters','script','synth','assemble'].includes(stage)&&selected.size?[...selected]:undefined;job=await api('/api/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({epub:book.epubPath,stage,chapters,rerun:!rebuild,rebuild})});notice('Running '+stageLabel(stage)+(chapters?' for '+chapters.length+' selected chapter'+(chapters.length===1?'':'s'):'')+'…','progress');renderJob(job);render();poll()}catch(e){notice(e.message,'error')}}
+async function run(stage,rebuild){if(stage==='synth'&&!confirm('Synthesis sends the selected text to your configured TTS provider and may incur charges. Continue?'))return;try{const chapters=!rebuild&&['chapters','script','synth','assemble'].includes(stage)&&selected.size?[...selected]:undefined;job=await api('/api/run',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({epub:book.epubPath,stage,chapters,rerun:!rebuild,rebuild,llm:selectedLlm()})});notice('Running '+stageLabel(stage)+(chapters?' for '+chapters.length+' selected chapter'+(chapters.length===1?'':'s'):'')+'…','progress');renderJob(job);render();poll()}catch(e){notice(e.message,'error')}}
+function closeTaskButton(){let button=$('#close-task');if(button)return button;button=document.createElement('button');button.id='close-task';button.className='danger';button.textContent='Close task';button.hidden=true;$('#activity').insertBefore(button,$('#activity-status'));return button}
+async function closeTask(){if(!job||job.status!=='running')return;const button=closeTaskButton();button.disabled=true;try{job=await api('/api/job/cancel',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:job.id})});renderJob(job)}catch(e){button.disabled=false;notice(e.message,'error')}}
 function renderJob(current){
+  const close=closeTaskButton();
+  close.hidden=current.status!=='running'&&current.status!=='cancelling';
+  close.disabled=current.status==='cancelling';
+  close.textContent=current.status==='cancelling'?'Cancelling…':'Close task';
+  close.onclick=closeTask;
   const log=$('#activity-log');
   if(activityJobId!==current.id){log.replaceChildren();activityJobId=current.id;activityEventCount=0;activityError=null}
   $('#activity').hidden=false;
@@ -250,7 +305,18 @@ function renderJob(current){
   $('#activity-status').textContent=current.epubPath.split('/').pop()+' · '+current.stage+' · '+current.status+elapsed;
   const progress=current.progress;
   $('#chapter-progress').hidden=!progress;
-  if(progress){
+  if(progress&&'activity' in progress){
+    const measured=progress.totalUnits>0&&progress.completedUnits!==undefined;
+    const percent=measured?Math.floor(100*progress.completedUnits/progress.totalUnits):0;
+    const settled=['completed','skipped'].includes(progress.phase);
+    const seconds=Math.floor((progress.elapsedMs+(!settled?Math.max(0,now-(current.progressUpdatedAt??now)):0))/1000);
+    $('#progress-title').textContent=progress.chapterIndex===undefined?stageLabel(current.stage).replace(/^./,c=>c.toUpperCase()):'Chapter '+(progress.chapterIndex+1)+': '+progress.chapterTitle;
+    $('#progress-phase').textContent=progress.activity+' · '+seconds+'s elapsed';
+    $('#progress-bar').hidden=!measured&&(settled||current.status!=='running');
+    if(measured)$('#progress-bar').value=percent;else $('#progress-bar').removeAttribute('value');
+    $('#progress-text').textContent=measured?progress.completedUnits+'/'+progress.totalUnits+' '+progress.unit+' · '+percent+'%':'';
+    $('#progress-chapters').textContent=progress.totalChapters===undefined?'':progress.completedChapters+'/'+progress.totalChapters+' chapters complete';
+  }else if(progress){
     const percent=progress.totalChars?Math.floor(100*progress.processedChars/progress.totalChars):0;
     const settled=['completed','skipped'].includes(progress.phase);
     const seconds=Math.floor((progress.elapsedMs+(!settled?Math.max(0,now-(current.progressUpdatedAt??now)):0))/1000);
@@ -270,6 +336,6 @@ function renderJob(current){
   if(atBottom)log.scrollTop=log.scrollHeight;
 }
 function shellQuote(value){return JSON.stringify(String(value))}function showCommand(stage){const chapters=['chapters','script','synth','assemble'].includes(stage)&&selected.size?[...selected]:undefined;const parts=['npm run dev -- run',shellQuote(book.epubPath),stage];if(chapters)parts.push('--chapters',chapters.join(','));parts.push('--rerun','--work',shellQuote(book.workRoot));if(stage==='assemble')parts.push('--out',shellQuote(book.outDir));$('#cmd-title').textContent='Run '+stageLabel(stage)+' from the command line';$('#cmd-text').textContent=parts.join(' ');$('#cmd-dialog').showModal()}async function copyCommand(){const command=$('#cmd-text').textContent;try{await navigator.clipboard.writeText(command);$('#cmd-dialog').close();notice('Command copied.','success')}catch(e){notice('Could not copy the command. Select and copy it manually.','error')}}
-async function poll(){if(!job)return;try{const current=await api('/api/job?id='+encodeURIComponent(job.id));job=current;renderJob(current);if(current.status==='running'){setTimeout(poll,700);return}if(current.status==='failed')notice(current.error,'error');else notice(current.output?'Created '+current.output:current.events.at(-1)?.message||'Stage complete.','success');job=null;book=await api('/api/book?epub='+encodeURIComponent(book.epubPath));render();refreshBooks()}catch(e){notice(e.message,'error');job=null;render()}}
-$('#open-form').onsubmit=e=>{e.preventDefault();openBook($('#epub').value)};$('#select-all').onclick=()=>{book.chapters.filter(c=>c.narrate).forEach(c=>selected.add(c.index));render()};$('#clear-selection').onclick=()=>{selected.clear();render()};$('#close-cmd').onclick=()=>$('#cmd-dialog').close();$('#copy-cmd').onclick=copyCommand;$('#save-casting').onclick=async()=>{if(!book.casting)return;const next={version:2,narrator:{...book.casting.narrator},characters:{}};const bindings=book.bindings?structuredClone(book.bindings):undefined;document.querySelectorAll('[data-voice]').forEach(x=>{const name=x.dataset.voice;const instructions=document.querySelector('[data-instructions="'+CSS.escape(name)+'"]').value;const current=name==='narrator'?book.casting.narrator:book.casting.characters[name];const item={...current,instructions};if(name==='narrator')next.narrator=item;else next.characters[name]=item;if(bindings&&x.value){const voice=voices.find(v=>v.id===x.value);if(voice){const existing=name==='narrator'?bindings.narrator:bindings.characters[name];const assignment={...existing,libraryVoiceId:voice.id,voiceId:voice.nativeVoiceId,selection:'manual',match:{reasons:['Selected manually in the workspace.'],limitations:[]}};if(name==='narrator')bindings.narrator=assignment;else bindings.characters[name]=assignment}}});try{book=await api('/api/casting',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({epub:book.epubPath,casting:next,bindings})});notice('Cast and bindings saved. Existing audio is now stale.','success');render();refreshBooks()}catch(e){notice(e.message,'error')}};Promise.all([refreshBooks(),api('/api/voices')]).then(([,v])=>{voices=v}).catch(e=>notice(e.message,'error'));
+async function poll(){if(!job)return;try{const current=await api('/api/job?id='+encodeURIComponent(job.id));job=current;renderJob(current);if(current.status==='running'||current.status==='cancelling'){setTimeout(poll,700);return}if(current.status==='failed')notice(current.error,'error');else if(current.status==='cancelled')notice('Task cancelled.','progress');else notice(current.output?'Created '+current.output:current.events.at(-1)?.message||'Stage complete.','success');job=null;book=await api('/api/book?epub='+encodeURIComponent(book.epubPath));render();refreshBooks()}catch(e){notice(e.message,'error');job=null;render()}}
+$('#open-form').onsubmit=e=>{e.preventDefault();openBook($('#epub').value)};$('#select-all').onclick=()=>{book.chapters.filter(c=>c.narrate).forEach(c=>selected.add(c.index));render()};$('#clear-selection').onclick=()=>{selected.clear();render()};$('#open-settings').onclick=async()=>{try{modelSettings=await api('/api/settings');renderModelSettings();$('#settings-dialog').showModal()}catch(e){notice(e.message,'error')}};$('#close-settings').onclick=()=>$('#settings-dialog').close();$('#llm-provider').onchange=renderModelChoices;$('#llm-model').oninput=renderModelChoices;$('#apply-settings').onclick=()=>{const provider=$('#llm-provider').value,model=$('#llm-model').value.trim();if(!model)return notice('Enter a text-processing model name.','error');activeLlm={provider,model};$('#settings-dialog').close();notice('New text-processing runs will use '+provider+' / '+model+'.','success')};$('#close-cmd').onclick=()=>$('#cmd-dialog').close();$('#copy-cmd').onclick=copyCommand;$('#save-casting').onclick=async()=>{if(!book.casting)return;const next={version:2,narrator:{...book.casting.narrator},characters:{}};const bindings=book.bindings?structuredClone(book.bindings):undefined;document.querySelectorAll('[data-voice]').forEach(x=>{const name=x.dataset.voice;const instructions=document.querySelector('[data-instructions="'+CSS.escape(name)+'"]').value;const current=name==='narrator'?book.casting.narrator:book.casting.characters[name];const item={...current,instructions};if(name==='narrator')next.narrator=item;else next.characters[name]=item;if(bindings&&x.value){const voice=voices.find(v=>v.id===x.value);if(voice){const existing=name==='narrator'?bindings.narrator:bindings.characters[name];const assignment={...existing,libraryVoiceId:voice.id,voiceId:voice.nativeVoiceId,selection:'manual',match:{reasons:['Selected manually in the workspace.'],limitations:[]}};if(name==='narrator')bindings.narrator=assignment;else bindings.characters[name]=assignment}}});try{book=await api('/api/casting',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({epub:book.epubPath,casting:next,bindings})});notice('Cast and bindings saved. Existing audio is now stale.','success');render();refreshBooks()}catch(e){notice(e.message,'error')}};Promise.all([refreshBooks(),api('/api/voices'),api('/api/settings')]).then(([,v,settings])=>{voices=v;modelSettings=settings}).catch(e=>notice(e.message,'error'));
 </script></body></html>`;

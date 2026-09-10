@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { STAGES, type Stage } from '../config.js';
+import { STAGES, withLlmRunConfig, type ProviderId, type Stage } from '../config.js';
 import { WorkDir } from '../state.js';
 import type { Analysis, BookMetadata } from '../types.js';
 import { runAnalyze } from './analyze.js';
@@ -14,7 +14,8 @@ import { runSynth } from './synth.js';
 import { runVoices } from './voices.js';
 import type { VoiceTarget } from '../voices/library.js';
 import { withWarningReporter } from '../util/warnings.js';
-import type { ChapterProgress } from '../util/progress.js';
+import { withStageProgress, type ChapterProgress, type ActivityProgress } from '../util/progress.js';
+import { throwIfTaskCancelled, withTaskCancellation } from '../util/cancellation.js';
 
 export type ChapterStage = 'chapters' | 'script' | 'synth';
 
@@ -22,11 +23,15 @@ export interface PipelineEvent {
   type: 'started' | 'completed' | 'skipped' | 'warning' | 'progress';
   stage: Stage;
   message: string;
-  progress?: ChapterProgress;
+  progress?: ChapterProgress | ActivityProgress;
   heartbeat?: boolean;
 }
 
 export interface RunStageOptions {
+  /** Override the text-processing provider for this one run. */
+  llmProvider?: ProviderId;
+  /** Override the text-processing model for this one run. */
+  llmModel?: string;
   voiceTarget?: VoiceTarget;
   voiceLibraryFile?: string;
   epubPath: string;
@@ -37,6 +42,8 @@ export interface RunStageOptions {
   /** Execute the stage even when its completion record and output already exist. */
   rerun?: boolean;
   rebuild?: boolean;
+  /** Abort an in-progress local UI task. */
+  signal?: AbortSignal;
   onEvent?: (event: PipelineEvent) => void;
 }
 
@@ -59,14 +66,18 @@ const CHAPTER_STAGES = new Set<Stage>(['chapters', 'script', 'synth']);
 
 /** Run exactly one stage. The CLI and local UI both use this instead of duplicating orchestration. */
 export async function runStage(options: RunStageOptions): Promise<RunStageResult> {
-  return withWarningReporter((message) => {
+  return withTaskCancellation(options.signal, () => withLlmRunConfig({ provider: options.llmProvider, model: options.llmModel }, () => withWarningReporter((message) => {
     if (options.onEvent) options.onEvent({ type: 'warning', stage: options.stage, message });
     else console.warn(`  ${message}`);
-  }, () => executeStage(options));
+  }, () => withStageProgress((progress, message, heartbeat) => {
+    if (options.onEvent) options.onEvent({ type: 'progress', stage: options.stage, progress, message, heartbeat });
+    else console.log(`[${options.stage}] ${message}`);
+  }, () => executeStage(options)))));
 }
 
 async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
   const { epubPath, workRoot, outDir, stage, rebuild, rerun, onEvent } = options;
+  throwIfTaskCancelled();
   if (!STAGES.includes(stage)) throw new Error(`Unknown stage "${stage}".`);
   if (!fs.existsSync(epubPath)) throw new Error(`EPUB file not found: ${epubPath}`);
 
@@ -152,10 +163,11 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
       if (!selected || work.isDone('synth')) work.recordSynthesisInputs();
       break;
     case 'assemble':
-      output = runAssemble(work, outDir, chapterIndexes);
+      output = await runAssemble(work, outDir, chapterIndexes);
       if (!chapterIndexes) work.markDone(stage);
       break;
   }
+  throwIfTaskCancelled();
   onEvent?.({ type: 'completed', stage, message: output ? `Created ${output}` : `${stage} complete.` });
   return { work, stage, skipped: false, output, chapterIndexes: selected };
 }

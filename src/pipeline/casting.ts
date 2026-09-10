@@ -4,11 +4,13 @@ import { config } from '../config.js';
 import { CastingSchema, type Analysis, type Casting, type ChapterScript } from '../types.js';
 import type { WorkDir } from '../state.js';
 import { readCharacterRegistry } from './list-characters.js';
+import { reportProgress } from '../util/progress.js';
 
 /**
  * Stage 6: describe intended character voices without selecting a provider or model.
  */
 export async function runCasting(work: WorkDir): Promise<Casting> {
+  reportProgress({ activity: 'Reading character profiles and counting scripted speakers' });
   const analysis = work.readJson<Analysis>('analysis.json');
   const registry = readCharacterRegistry(work);
 
@@ -40,6 +42,7 @@ export async function runCasting(work: WorkDir): Promise<Casting> {
       characters: {},
     };
     work.writeJson('casting.json', casting);
+    reportProgress({ activity: 'Narrator profile saved; no character voices needed', phase: 'completed' });
     return casting;
   }
 
@@ -53,6 +56,7 @@ export async function runCasting(work: WorkDir): Promise<Casting> {
     })
     .join('\n');
 
+  reportProgress({ activity: `Designing narrator and ${ranked.length} character voice profiles — waiting for model response` });
   const casting = await jsonCall({
     model: config.analysisModel,
     schema: CastingSchema,
@@ -73,6 +77,7 @@ Characters:
 ${castDetails}`,
   });
 
+  reportProgress({ activity: 'Checking and saving voice profiles', phase: 'saving' });
   casting.version = 2;
   for (const [name] of ranked) {
     const assignment = casting.characters[name];
@@ -92,5 +97,6 @@ ${castDetails}`,
   }
 
   work.writeJson('casting.json', casting);
+  reportProgress({ activity: 'Voice profiles saved', phase: 'completed' });
   return casting;
 }

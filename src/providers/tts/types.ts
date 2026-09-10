@@ -10,6 +10,8 @@ export interface SynthesisRequest {
   voiceId: string;
   /** Delivery/persona instructions, for providers that support them. */
   instructions?: string;
+  /** Signal used by the local workspace to stop a running task. */
+  signal?: AbortSignal;
 }
 
 /**

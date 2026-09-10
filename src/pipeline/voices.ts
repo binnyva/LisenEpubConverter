@@ -5,9 +5,11 @@ import type { WorkDir } from '../state.js';
 import { CastingSchema, ChapterScriptSchema, VoiceBindingsSchema, type CastSpeaker, type Casting, type VoiceBinding, type VoiceBindings } from '../types.js';
 import { config } from '../config.js';
 import { defaultVoiceTarget, loadVoiceLibrary, modelId, type LibraryVoice, type VoiceTarget } from '../voices/library.js';
+import { reportProgress } from '../util/progress.js';
 
 /** Stage 7: apply one compatible library model to a provider-neutral cast. */
 export function runVoices(work: WorkDir, target = defaultVoiceTarget(), libraryFile = config.voiceLibraryFile): VoiceBindings {
+  reportProgress({ activity: 'Loading voice catalogue and validating scripted speakers' });
   const library = loadVoiceLibrary(libraryFile);
   const targetId = modelId(target);
   const model = library.models.find((entry) => entry.id === targetId);
@@ -21,12 +23,16 @@ export function runVoices(work: WorkDir, target = defaultVoiceTarget(), libraryF
     ? VoiceBindingsSchema.parse(work.readJson('voice-bindings.json'))
     : undefined;
   const used = new Set<string>();
+  const totalSpeakers = Object.keys(casting.characters).length + 1;
+  reportProgress({ activity: 'Matching narrator and character voices', completedUnits: 0, totalUnits: totalSpeakers, unit: 'speakers matched' });
   const narrator = chooseBinding(casting.narrator, existing?.narrator, candidates, target, model.supportsInstructions, used);
   used.add(narrator.libraryVoiceId);
+  reportProgress({ activity: 'Matched narrator voice', completedUnits: 1, totalUnits: totalSpeakers, unit: 'speakers matched' });
   const characters: Record<string, VoiceBinding> = {};
   for (const [name, speaker] of Object.entries(casting.characters)) {
     characters[name] = chooseBinding(speaker, existing?.characters[name], candidates, target, model.supportsInstructions, used);
     used.add(characters[name].libraryVoiceId);
+    reportProgress({ activity: `Matched voice for ${name}`, completedUnits: Object.keys(characters).length + 1, totalUnits: totalSpeakers, unit: 'speakers matched' });
   }
   const bindings: VoiceBindings = {
     version: 1,
@@ -36,6 +42,7 @@ export function runVoices(work: WorkDir, target = defaultVoiceTarget(), libraryF
     characters,
   };
   work.writeJson('voice-bindings.json', bindings);
+  reportProgress({ activity: 'Voice bindings saved', phase: 'completed', completedUnits: totalSpeakers, totalUnits: totalSpeakers, unit: 'speakers matched' });
   return bindings;
 }
 

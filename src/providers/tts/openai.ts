@@ -30,7 +30,7 @@ export class OpenAITTSProvider implements TTSProvider {
       input: req.text,
       ...(req.instructions ? { instructions: req.instructions } : {}),
       response_format: 'mp3',
-    });
+    }, { signal: req.signal });
     return Buffer.from(await res.arrayBuffer());
   }
 }

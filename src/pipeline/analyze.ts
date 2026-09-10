@@ -3,6 +3,7 @@ import { jsonCall } from '../providers/llm/openai.js';
 import { config } from '../config.js';
 import { AnalysisSchema, type Analysis, type BookMetadata } from '../types.js';
 import type { WorkDir } from '../state.js';
+import { reportProgress } from '../util/progress.js';
 
 const SKIP_TITLE_RE =
   /\b(contents|table of contents|acknowledg|thanks|appendix|index|copyright|license|colophon|dedication|about the author|also by|praise for|title page|other books|project gutenberg)\b/i;
@@ -12,6 +13,7 @@ const SKIP_TITLE_RE =
  * author profiles, and a narrate/skip decision per chapter.
  */
 export async function runAnalyze(work: WorkDir): Promise<Analysis> {
+  reportProgress({ activity: 'Reading chapter outlines and sampling book text' });
   const meta = work.readJson<BookMetadata>('metadata.json');
 
   const chapterOutlines = meta.chapters
@@ -30,6 +32,7 @@ export async function runAnalyze(work: WorkDir): Promise<Analysis> {
     .map((ch) => `--- From chapter ${ch.index} ("${ch.title}") ---\n${fs.readFileSync(work.path(ch.file), 'utf8').slice(0, 4000)}`)
     .join('\n\n');
 
+  reportProgress({ activity: `Analyzing ${meta.chapters.length} chapter outlines and sampled text — waiting for model response` });
   const analysis = await jsonCall({
     model: config.analysisModel,
     schema: AnalysisSchema,
@@ -57,6 +60,7 @@ Sample text:
 ${sampled}`,
   });
 
+  reportProgress({ activity: 'Checking chapter decisions and saving analysis', phase: 'saving' });
   // Backstop the LLM's chapter decisions with structural and keyword heuristics.
   const planByIndex = new Map(analysis.chapters.map((c) => [c.index, c]));
   analysis.chapters = meta.chapters.map((ch) => {
@@ -75,5 +79,6 @@ ${sampled}`,
   });
 
   work.writeJson('analysis.json', analysis);
+  reportProgress({ activity: 'Analysis saved', phase: 'completed' });
   return analysis;
 }

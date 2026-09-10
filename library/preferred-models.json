@@ -1,0 +1,7 @@
+{
+  "models": [
+    { "provider": "openai", "model": "gpt-4.1", "starred": true },
+    { "provider": "openai", "model": "gpt-4.1-mini", "starred": true },
+    { "provider": "openrouter", "model": "openai/gpt-4.1", "starred": false }
+  ]
+}

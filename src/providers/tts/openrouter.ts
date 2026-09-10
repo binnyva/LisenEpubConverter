@@ -46,6 +46,7 @@ export class OpenRouterTTSProvider implements TTSProvider {
           ? { provider: { options: { openai: { instructions: req.instructions } } } }
           : {}),
       }),
+      signal: req.signal,
     });
     if (!res.ok) {
       throw new Error(`OpenRouter TTS request failed (${res.status}): ${(await res.text()).slice(0, 1000)}`);

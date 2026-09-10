@@ -7,6 +7,7 @@ import type { WorkDir } from '../state.js';
 import type { Analysis, BookMetadata, ChapterSummaries } from '../types.js';
 import { CharacterObservationSchema, ChapterCharactersSchema, type ChapterCharacters } from '../types.js';
 import { buildCharacterRegistry, characterChapterFile } from './list-characters.js';
+import { reportProgress, type ChapterProgress } from '../util/progress.js';
 
 const DiscoverySchema = z.object({ characters: z.array(CharacterObservationSchema) });
 const ChunkResultSchema = DiscoverySchema.extend({
@@ -44,7 +45,16 @@ export async function runChapters(work: WorkDir, chapterIndexes?: number[]): Pro
     .filter((ch) => analysis.chapters.find((p) => p.index === ch.index)?.narrate)
     .filter((ch) => !chapterIndexes || chapterIndexes.includes(ch.index));
 
+  let completedChapters = 0;
   for (const ch of narratable) {
+    let processedChars = 0;
+    let totalChars = 0;
+    const progress = (activity: string, phase?: ChapterProgress['phase']) => reportProgress({
+      activity, phase, chapterIndex: ch.index, chapterTitle: ch.title,
+      completedChapters, totalChapters: narratable.length,
+      completedUnits: processedChars, totalUnits: totalChars, unit: 'characters processed',
+    });
+    progress('Checking existing chapter output');
     const cleanFile = `chapters-clean/${String(ch.index).padStart(2, '0')}.md`;
     const observationFile = characterChapterFile(ch.index);
     const hasCleanOutput = summaries[ch.index] !== undefined && fs.existsSync(work.path(cleanFile));
@@ -53,16 +63,22 @@ export async function runChapters(work: WorkDir, chapterIndexes?: number[]): Pro
       const existing = fs.readFileSync(work.path(cleanFile), 'utf8');
       const normalized = normalizeNonBreakingSpaces(existing);
       if (normalized !== existing) fs.writeFileSync(work.path(cleanFile), normalized);
-      if (fs.existsSync(work.path(observationFile))) continue;
+      if (fs.existsSync(work.path(observationFile))) {
+        completedChapters++;
+        progress('Reusing cleaned text, summary and character observations', 'skipped');
+        continue;
+      }
       if (!analysis.isFiction) {
         work.writeJson(observationFile, { index: ch.index, observations: [] });
+        completedChapters++;
+        progress('Reused cleaned text and saved empty character observations', 'completed');
         continue;
       }
     }
 
-    console.log(`  Chapter ${ch.index}: "${ch.title}" (${ch.words} words)`);
     const text = fs.readFileSync(work.path(ch.file), 'utf8');
     const blocks = splitIntoBlocks(text, config.llmChunkChars);
+    totalChars = blocks.reduce((sum, block) => sum + block.length, 0);
 
     const recentSummaries = Object.entries(summaries)
       .slice(-5)
@@ -77,6 +93,7 @@ export async function runChapters(work: WorkDir, chapterIndexes?: number[]): Pro
       .filter((earlier) => fs.existsSync(work.path(characterChapterFile(earlier.index))))
       .map((earlier) => ChapterCharactersSchema.parse(work.readJson(characterChapterFile(earlier.index))));
     for (const [i, block] of blocks.entries()) {
+      progress(`${hasCleanOutput ? 'Discovering speakers in' : 'Cleaning and summarizing'} block ${i + 1}/${blocks.length} — waiting for model response`);
       const knownCharacters = buildCharacterRegistry([...earlierDiscoveries, discoveries]).characters
         .map(({ name, aliases, chapters }) => ({ name, aliases, chapters }));
       const context = `Book: "${meta.title}" (${analysis.isFiction ? 'fiction' : 'non-fiction'})
@@ -95,6 +112,7 @@ Text:\n${block}`;
           user: context,
         });
         discoveries.observations.push(...result.characters.map((character) => ({ ...character, chunk: i })));
+        processedChars += block.length;
         continue;
       }
       const result = await jsonCall({
@@ -117,13 +135,17 @@ ${CHARACTER_RULES}`,
       cleanedParts.push(normalizeNonBreakingSpaces(result.cleanedText));
       partialSummaries.push(result.partialSummary);
       if (analysis.isFiction) discoveries.observations.push(...result.characters.map((character) => ({ ...character, chunk: i })));
+      processedChars += block.length;
     }
 
+    progress('Saving chapter output', 'saving');
     if (!hasCleanOutput) {
       fs.writeFileSync(work.path(cleanFile), cleanedParts.join('\n\n'));
       summaries[ch.index] = partialSummaries.join(' ');
       work.writeJson(SUMMARIES_FILE, summaries);
     }
     work.writeJson(observationFile, discoveries);
+    completedChapters++;
+    progress('Chapter complete', 'completed');
   }
 }
