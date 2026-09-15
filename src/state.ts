@@ -127,6 +127,16 @@ export class WorkDir {
     this.save();
   }
 
+  /**
+   * Clear only stages that depend on `stage`, retaining the stage's own
+   * per-chapter completion record. This lets selected chapter reruns build up
+   * toward a completed whole-book stage.
+   */
+  invalidateAfter(stage: Stage): void {
+    const next = STAGES[STAGES.indexOf(stage) + 1];
+    if (next) this.invalidateFrom(next);
+  }
+
   recordSynthesisInputs(): void {
     this.state.synthesisInputHash = this.synthesisInputsHash();
     this.save();

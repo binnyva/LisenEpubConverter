@@ -26,6 +26,79 @@ const CHARACTER_RULES = `characters: list speaking characters actually present i
 - The initial character candidates are provisional context, not a closed list. Discover late-appearing speakers.
 - For non-fiction return characters: [].`;
 
+const observationKey = (name: string): string => name.normalize('NFKC').trim().toLowerCase();
+const importanceRank = { minor: 0, secondary: 1, main: 2 } as const;
+
+/**
+ * A chapter is processed in chunks, so the same speaker can be found more than
+ * once. Keep one chapter-level observation for each normalized name while
+ * retaining the useful evidence and the strongest supported profile details.
+ */
+export function mergeChapterObservations(
+  observations: ChapterCharacters['observations'],
+): ChapterCharacters['observations'] {
+  const groups = new Map<string, ChapterCharacters['observations']>();
+  for (const observation of observations) {
+    const name = observation.name.trim();
+    const identity = observationKey(name);
+    // Preserve malformed/blank observations as-is; the schema or later review
+    // can surface them instead of silently combining unrelated records.
+    if (!identity) {
+      groups.set(`__blank_${groups.size}`, [{ ...observation, name }]);
+      continue;
+    }
+    const group = groups.get(identity) ?? [];
+    group.push({ ...observation, name });
+    groups.set(identity, group);
+  }
+
+  return [...groups.values()].map((group) => {
+    const first = group[0];
+    if (group.length === 1) return first;
+
+    const aliases: string[] = [];
+    const seenAliases = new Set<string>();
+    const evidence: string[] = [];
+    const seenEvidence = new Set<string>();
+    for (const observation of group) {
+      for (const alias of observation.aliases) {
+        const trimmed = alias.trim();
+        const identity = observationKey(trimmed);
+        if (identity && !seenAliases.has(identity)) {
+          seenAliases.add(identity);
+          aliases.push(trimmed);
+        }
+      }
+      const text = observation.evidence.trim();
+      const identity = observationKey(text);
+      if (text && !seenEvidence.has(identity)) {
+        seenEvidence.add(identity);
+        evidence.push(text);
+      }
+    }
+
+    const supported = (field: 'sex' | 'age' | 'race' | 'class' | 'country'): string => group
+      .map((observation) => observation[field])
+      .find((value) => observationKey(value) !== 'unknown') ?? 'unknown';
+    return {
+      ...first,
+      aliases,
+      evidence: evidence.join(' '),
+      named: group.some((observation) => observation.named),
+      confidence: group.some((observation) => observation.confidence === 'high') ? 'high' as const : 'low' as const,
+      importance: group.reduce((best, observation) =>
+        importanceRank[observation.importance] > importanceRank[best] ? observation.importance : best,
+      first.importance),
+      chunk: Math.min(...group.map((observation) => observation.chunk)),
+      sex: supported('sex') as 'male' | 'female' | 'unknown',
+      age: supported('age'),
+      race: supported('race'),
+      class: supported('class'),
+      country: supported('country'),
+    };
+  });
+}
+
 /**
  * Stage 3: per narratable chapter — a summary (context for later stages) and a
  * lightly cleaned version of the text for audio. Processes chapters in order so
@@ -64,6 +137,11 @@ export async function runChapters(work: WorkDir, chapterIndexes?: number[]): Pro
       const normalized = normalizeNonBreakingSpaces(existing);
       if (normalized !== existing) fs.writeFileSync(work.path(cleanFile), normalized);
       if (fs.existsSync(work.path(observationFile))) {
+        const existingObservations = ChapterCharactersSchema.parse(work.readJson(observationFile));
+        const mergedObservations = mergeChapterObservations(existingObservations.observations);
+        if (mergedObservations.length !== existingObservations.observations.length) {
+          work.writeJson(observationFile, { ...existingObservations, observations: mergedObservations });
+        }
         completedChapters++;
         progress('Reusing cleaned text, summary and character observations', 'skipped');
         continue;
@@ -144,7 +222,10 @@ ${CHARACTER_RULES}`,
       summaries[ch.index] = partialSummaries.join(' ');
       work.writeJson(SUMMARIES_FILE, summaries);
     }
-    work.writeJson(observationFile, discoveries);
+    work.writeJson(observationFile, {
+      ...discoveries,
+      observations: mergeChapterObservations(discoveries.observations),
+    });
     completedChapters++;
     progress('Chapter complete', 'completed');
   }

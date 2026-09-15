@@ -97,7 +97,12 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
     work.invalidateFrom(stage);
     clearArtifactsFrom(work, stage);
   } else if (rerun) {
-    work.invalidateFrom(stage);
+    // A selected chapter rerun replaces that chapter's output, but must retain
+    // completion from earlier selected runs. Only its dependants become stale.
+    // Without this distinction, every UI selected run erased the progress made
+    // by the previous selection, so a whole-book stage could never complete.
+    if (chapterIndexes && CHAPTER_STAGES.has(stage)) work.invalidateAfter(stage);
+    else work.invalidateFrom(stage);
     clearStageOutputForRerun(work, stage, chapterIndexes);
   }
 
@@ -383,6 +388,14 @@ function markChapterStage(work: WorkDir, stage: ChapterStage, indexes?: number[]
     const complete = all.filter((index) => summaries[String(index)] !== undefined &&
       fs.existsSync(work.path(`chapters-clean/${String(index).padStart(2, '0')}.md`)) &&
       fs.existsSync(work.path(characterChapterFile(index))));
+    work.markChaptersDone(stage, complete, all);
+    return;
+  }
+  if (stage === 'script') {
+    // A run can stop at the first unresolved speaker. When that speaker is
+    // resolved, earlier script files remain valid and let the next selected
+    // run continue from the failed chapter rather than starting over.
+    const complete = all.filter((index) => fs.existsSync(work.path(`script/${String(index).padStart(2, '0')}.json`)));
     work.markChaptersDone(stage, complete, all);
     return;
   }

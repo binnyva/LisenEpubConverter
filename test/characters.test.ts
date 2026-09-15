@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkDir } from '../src/state.js';
 import { CharacterObservationSchema, type ChapterCharacters } from '../src/types.js';
 import { buildCharacterRegistry, characterChapterFile, runListCharacters } from '../src/pipeline/list-characters.js';
+import { mergeChapterObservations } from '../src/pipeline/chapters.js';
 import { clearArtifactsFrom, recoverStageStateFromArtifacts, runStage } from '../src/pipeline/runner.js';
 import { runScript } from '../src/pipeline/script.js';
 import { runCasting } from '../src/pipeline/casting.js';
@@ -45,6 +46,20 @@ function fixture(count = 2) {
 }
 
 describe('book character registry', () => {
+  it('merges repeated character observations from separate chapter chunks', () => {
+    const merged = mergeChapterObservations([
+      observation('Alice', { aliases: ['Al'], evidence: 'Alice speaks.', chunk: 0 }),
+      observation(' alice ', { aliases: ['Ally'], evidence: 'Alice answers.', age: 'child', chunk: 2 }),
+      observation('Rabbit', { chunk: 1 }),
+    ]);
+    expect(merged).toHaveLength(2);
+    expect(merged[0]).toMatchObject({
+      name: 'Alice', aliases: ['Al', 'Ally'], age: 'child', chunk: 0,
+      evidence: 'Alice speaks. Alice answers.',
+    });
+    expect(merged[1].name).toBe('Rabbit');
+  });
+
   it('discovers late characters and merges explicit aliases with chapter evidence', () => {
     const registry = buildCharacterRegistry([
       chapter(0, [observation('Alice Smith', { aliases: ['Alice'], age: 'adult' })]),
@@ -142,6 +157,29 @@ describe('character discovery orchestration', () => {
     clearArtifactsFrom(work, 'list-characters');
     expect(fs.existsSync(work.path(characterChapterFile(1)))).toBe(true);
     expect(fs.existsSync(work.path('audio-cache/paid.mp3'))).toBe(true);
+  });
+
+  it('accumulates selected Script reruns while invalidating only downstream stages', async () => {
+    const { work, options } = fixture();
+    work.writeJson('analysis.json', { ...work.readJson<object>('analysis.json'), isFiction: false });
+    work.writeJson('chapter-summaries.json', { 0: 'First.', 1: 'Second.' });
+    work.dir('chapters-clean');
+    fs.writeFileSync(work.path('chapters-clean/00.md'), 'First.');
+    fs.writeFileSync(work.path('chapters-clean/01.md'), 'Second.');
+    work.writeJson('characters.json', { version: 1, chapters: [0, 1], characters: [] });
+    work.markDone('chapters');
+    work.markDone('list-characters');
+    work.markDone('casting');
+
+    await runStage({ ...options, stage: 'script', chapterIndexes: [0], rerun: true });
+    let current = new WorkDir(options.epubPath, options.workRoot);
+    expect(current.completedChapters('script')).toEqual([0]);
+    expect(current.isDone('casting')).toBe(false);
+
+    await runStage({ ...options, stage: 'script', chapterIndexes: [1], rerun: true });
+    current = new WorkDir(options.epubPath, options.workRoot);
+    expect(current.completedChapters('script')).toEqual([0, 1]);
+    expect(current.isDone('script')).toBe(true);
   });
 
   it('rejects chapter selection for the whole-book stage before invalidating output', async () => {

@@ -107,6 +107,30 @@ describe('UI stage activity', () => {
     expect(nodes.get('#characters').innerHTML).toContain('Needs review');
     vm.runInContext("book.state.completed['list-characters']='done';book.characterRegistry={characters:[]};renderCharacters()", context);
     expect(nodes.get('#character-status').textContent).toBe('Book character registry · 0 characters');
+    expect(nodes.get('#characters').innerHTML).toContain('Review and edit registry');
+  });
+
+  it('renders conflicting character details as selectable choices', () => {
+    const { context } = browser();
+    const markup = vm.runInContext("issueMarkup('Conflicting age: young girl / young / child.')", context);
+    expect(markup).toContain('data-conflict-choice');
+    expect(markup).toContain('data-conflict-field="age"');
+    expect(markup).toContain('young girl');
+  });
+
+  it('offers an unresolved speaker a match-or-add resolution in the character dialog', () => {
+    const { context } = browser();
+    vm.runInContext("candidateResolutions={};book={characterCandidates:[],characterRegistry:{characters:[{id:'alice',name:'Alice'}]}}", context);
+    const markup = vm.runInContext("candidateMarkup({key:'candidate-poem-fury',speaker:'Poem Fury',chapters:[4],samples:[]},book.characterRegistry)", context);
+    expect(markup).toContain('Unresolved speaker: Poem Fury');
+    expect(markup).toContain('Add Poem Fury as a new character');
+    expect(markup).toContain('Use existing character: Alice');
+  });
+
+  it('resumes Script at the first chapter with an unresolved speaker', () => {
+    const { context } = browser();
+    vm.runInContext("book={characterCandidates:[{chapters:[8]},{chapters:[4,7]}]}", context);
+    expect(vm.runInContext('resumeFromCandidateChapter()', context)).toBe(4);
   });
 
   it.each(['completed', 'failed'])('shows retry warnings while polling and retains them after %s', async (status) => {
