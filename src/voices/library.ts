@@ -150,6 +150,22 @@ export function voicesForTarget(target: VoiceTarget): Voice[] {
   return loadVoiceCatalog(config.ttsVoicesFile);
 }
 
+/**
+ * Convert the shared library's compatible voices to the small shape required
+ * by a TTS adapter. This lets synthesis use the same catalogue that produced
+ * the saved voice bindings, rather than requiring a duplicate legacy file.
+ */
+export function libraryVoicesForTarget(target: VoiceTarget, file = config.voiceLibraryFile): Voice[] {
+  const targetId = modelId(target);
+  return loadVoiceLibrary(file).voices
+    .filter((voice) => voice.models.includes(targetId) && voice.availability !== 'unavailable')
+    .map((voice) => ({
+      id: voice.nativeVoiceId,
+      sex: voice.traits.presentation === 'unknown' ? 'neutral' : voice.traits.presentation,
+      description: voice.description,
+    }));
+}
+
 function toLibraryVoice(voice: Voice, targetId: string): LibraryVoice {
   const description = voice.description.toLowerCase();
   const tone = ['bright', 'friendly', 'calm', 'warm', 'energetic', 'soft', 'expressive', 'steady', 'authoritative']

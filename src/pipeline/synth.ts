@@ -23,7 +23,7 @@ export async function runSynth(work: WorkDir, chapterIndexes?: number[]): Promis
   const casting = work.readJson<Casting>('casting.json');
   const bindings = validateVoiceBindings(work);
   const meta = work.readJson<BookMetadata>('metadata.json');
-  const provider = getTTSProvider(bindings.target);
+  const provider = getTTSProvider(bindings.target, bindings.libraryFile);
 
   // Casting instructions that mention a nationality or accent ("Portuguese-
   // accented narration") can make the TTS model switch into that language and

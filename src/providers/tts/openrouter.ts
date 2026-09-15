@@ -2,6 +2,7 @@ import { config } from '../../config.js';
 import type { SynthesisRequest, TTSProvider, Voice } from './types.js';
 import { loadVoiceCatalog, OPENAI_VOICES } from './voices.js';
 import type { TTSProviderTarget } from './openai.js';
+import { libraryVoicesForTarget } from '../../voices/library.js';
 
 /** TTS implementation for OpenRouter's OpenAI-compatible audio/speech endpoint. */
 export class OpenRouterTTSProvider implements TTSProvider {
@@ -10,16 +11,22 @@ export class OpenRouterTTSProvider implements TTSProvider {
   private readonly voices: Voice[];
   private readonly model: string;
 
-  constructor(target: TTSProviderTarget = { provider: 'openrouter', model: config.ttsModel }) {
+  constructor(
+    target: TTSProviderTarget = { provider: 'openrouter', model: config.ttsModel },
+    voiceLibraryFile?: string,
+  ) {
     this.model = target.model;
     if (config.ttsVoicesFile) {
       this.voices = loadVoiceCatalog(config.ttsVoicesFile);
     } else if (this.model.startsWith('openai/')) {
       this.voices = OPENAI_VOICES;
     } else {
-      throw new Error(
-        `OpenRouter TTS model "${this.model}" has no built-in voice catalogue. Set LISEN_TTS_VOICES_FILE to a JSON file describing its supported voices.`
-      );
+      this.voices = libraryVoicesForTarget({ provider: 'openrouter', model: this.model }, voiceLibraryFile);
+      if (!this.voices.length) {
+        throw new Error(
+          `OpenRouter TTS model "${this.model}" has no compatible voices in the shared voice library. Add its catalogue there or set LISEN_TTS_VOICES_FILE to a JSON file describing its supported voices.`
+        );
+      }
     }
   }
 

@@ -167,7 +167,7 @@ npm run dev -- voices refresh --library ./library/openrouter-voices.json
 # Set LISEN_VOICE_LIBRARY_FILE=./library/openrouter-voices.json for subsequent runs.
 ```
 
-Other speech models have model-specific voice IDs. Create a legacy catalogue such as `my-model-voices.json` for import, or point `LISEN_TTS_VOICES_FILE` at it before refreshing a separate library:
+Other speech models have model-specific voice IDs. Add their model and compatible voices to the configured shared library, or create a legacy catalogue such as `my-model-voices.json` and point `LISEN_TTS_VOICES_FILE` at it (the legacy file takes precedence):
 
 ```json
 [

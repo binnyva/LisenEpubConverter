@@ -35,12 +35,15 @@ export class OpenAITTSProvider implements TTSProvider {
   }
 }
 
-export function getTTSProvider(target: TTSProviderTarget = { provider: config.ttsProvider, model: config.ttsModel }): TTSProvider {
+export function getTTSProvider(
+  target: TTSProviderTarget = { provider: config.ttsProvider, model: config.ttsModel },
+  voiceLibraryFile?: string,
+): TTSProvider {
   switch (target.provider) {
     case 'openai':
       return new OpenAITTSProvider(target);
     case 'openrouter':
-      return new OpenRouterTTSProvider(target);
+      return new OpenRouterTTSProvider(target, voiceLibraryFile);
     case 'fish':
       throw new Error('Fish voice bindings are supported, but the Fish synthesis adapter is not implemented yet.');
     default:

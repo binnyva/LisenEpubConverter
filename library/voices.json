@@ -1,14 +1,15 @@
 {
   "version": 2,
-  "updatedAt": "2026-09-09T16:46:31Z",
-  "description": "Shared voice catalogue: OpenAI built-in speech voices and Fish Audio default voices.",
+  "updatedAt": "2026-09-15T23:44:00Z",
+  "description": "Shared voice catalogue: OpenAI built-in speech voices, Fish Audio default voices, and OpenRouter Kokoro preset voices.",
   "scope": {
     "providers": [
       "openai",
-      "fish"
+      "fish",
+      "openrouter"
     ],
-    "voiceCount": 20,
-    "modelCount": 7,
+    "voiceCount": 74,
+    "modelCount": 9,
     "includesCustomVoices": false,
     "includesCommunityVoices": false
   },
@@ -33,7 +34,8 @@
     "Fish's total request text limit was not established. The documented chunk_length range of 100–300 is a processing option, not a request-length limit.",
     "Fish reference-ID compatibility is inferred from the shared API contract and is explicitly marked on each voice.",
     "Hannah's profile says conversation specialist; the default list says conversion specialist. The profile description is used here.",
-    "Catalogue creation made no synthesis requests."
+    "Catalogue creation made no synthesis requests.",
+    "Kokoro preset voices, language assignments, and presentation are transcribed from the published voice list; no OpenRouter synthesis request was made."
   ],
   "sources": [
     {
@@ -105,6 +107,16 @@
       "id": "fish-hannah",
       "url": "https://fish.audio/app/m/9a9cf47702da476aa4629e2506d4a857/",
       "accessedAt": "2026-09-09T16:46:31Z"
+    },
+    {
+      "id": "kokoro-voices",
+      "url": "https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md",
+      "accessedAt": "2026-09-15T23:44:00Z"
+    },
+    {
+      "id": "openrouter-kokoro",
+      "url": "https://openrouter.ai/hexgrad/kokoro-82m",
+      "accessedAt": "2026-09-15T23:44:00Z"
     }
   ],
   "languageSets": [
@@ -214,6 +226,27 @@
       },
       "sourceIds": [
         "fish-models"
+      ]
+    },
+    {
+      "id": "kokoro-82m",
+      "languages": [
+        "en",
+        "ja",
+        "zh",
+        "es",
+        "fr",
+        "hi",
+        "it",
+        "pt"
+      ],
+      "publishedCount": {
+        "min": 54,
+        "exact": 54
+      },
+      "sourceIds": [
+        "kokoro-voices",
+        "openrouter-kokoro"
       ]
     }
   ],
@@ -542,6 +575,56 @@
       "annotations": {}
     },
     {
+      "id": "openrouter:fish-audio/s2.1-pro-free:free",
+      "provider": "openrouter",
+      "model": "fish-audio/s2.1-pro-free:free",
+      "availability": "listed",
+      "supportsInstructions": false,
+      "inputLimits": [
+        {
+          "field": "input",
+          "max": null,
+          "unit": "characters",
+          "scope": "request",
+          "status": "not-established-by-reviewed-docs"
+        }
+      ],
+      "provenance": {
+        "method": "user-supplied",
+        "sourceIds": [
+          "user-supplied-openrouter-catalogue"
+        ],
+        "notes": "Known OpenRouter model and voice mapping supplied by the user; synthesis has not been tested by Lisen."
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m",
+      "provider": "openrouter",
+      "model": "hexgrad/kokoro-82m",
+      "availability": "listed",
+      "supportsInstructions": false,
+      "inputLimits": [
+        {
+          "field": "input",
+          "max": 4096,
+          "unit": "tokens",
+          "scope": "request",
+          "status": "provider-documented"
+        }
+      ],
+      "languageSetId": "kokoro-82m",
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-15T23:44:00Z",
+        "sourceIds": [
+          "kokoro-voices",
+          "openrouter-kokoro"
+        ]
+      },
+      "annotations": {}
+    },
+    {
       "id": "fish:s2-pro",
       "provider": "fish",
       "model": "s2-pro",
@@ -683,6 +766,1410 @@
     }
   ],
   "voices": [
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_heart",
+      "nativeVoiceId": "af_heart",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_alloy",
+      "nativeVoiceId": "af_alloy",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_aoede",
+      "nativeVoiceId": "af_aoede",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_bella",
+      "nativeVoiceId": "af_bella",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_jessica",
+      "nativeVoiceId": "af_jessica",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_kore",
+      "nativeVoiceId": "af_kore",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_nicole",
+      "nativeVoiceId": "af_nicole",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_nova",
+      "nativeVoiceId": "af_nova",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_river",
+      "nativeVoiceId": "af_river",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_sarah",
+      "nativeVoiceId": "af_sarah",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_sky",
+      "nativeVoiceId": "af_sky",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_adam",
+      "nativeVoiceId": "am_adam",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_echo",
+      "nativeVoiceId": "am_echo",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_eric",
+      "nativeVoiceId": "am_eric",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_fenrir",
+      "nativeVoiceId": "am_fenrir",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_liam",
+      "nativeVoiceId": "am_liam",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_michael",
+      "nativeVoiceId": "am_michael",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_onyx",
+      "nativeVoiceId": "am_onyx",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_puck",
+      "nativeVoiceId": "am_puck",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_santa",
+      "nativeVoiceId": "am_santa",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:bf_alice",
+      "nativeVoiceId": "bf_alice",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "British English"
+      },
+      "description": "Kokoro British English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:bf_emma",
+      "nativeVoiceId": "bf_emma",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "British English"
+      },
+      "description": "Kokoro British English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:bf_isabella",
+      "nativeVoiceId": "bf_isabella",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "British English"
+      },
+      "description": "Kokoro British English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:bf_lily",
+      "nativeVoiceId": "bf_lily",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "British English"
+      },
+      "description": "Kokoro British English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:bm_daniel",
+      "nativeVoiceId": "bm_daniel",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "British English"
+      },
+      "description": "Kokoro British English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:bm_fable",
+      "nativeVoiceId": "bm_fable",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "British English"
+      },
+      "description": "Kokoro British English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:bm_george",
+      "nativeVoiceId": "bm_george",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "British English"
+      },
+      "description": "Kokoro British English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:bm_lewis",
+      "nativeVoiceId": "bm_lewis",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "British English"
+      },
+      "description": "Kokoro British English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:jf_alpha",
+      "nativeVoiceId": "jf_alpha",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "ja"
+        ],
+        "accent": "Japanese"
+      },
+      "description": "Kokoro Japanese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:jf_gongitsune",
+      "nativeVoiceId": "jf_gongitsune",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "ja"
+        ],
+        "accent": "Japanese"
+      },
+      "description": "Kokoro Japanese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:jf_nezumi",
+      "nativeVoiceId": "jf_nezumi",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "ja"
+        ],
+        "accent": "Japanese"
+      },
+      "description": "Kokoro Japanese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:jf_tebukuro",
+      "nativeVoiceId": "jf_tebukuro",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "ja"
+        ],
+        "accent": "Japanese"
+      },
+      "description": "Kokoro Japanese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:jm_kumo",
+      "nativeVoiceId": "jm_kumo",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "ja"
+        ],
+        "accent": "Japanese"
+      },
+      "description": "Kokoro Japanese male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:zf_xiaobei",
+      "nativeVoiceId": "zf_xiaobei",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "zh"
+        ],
+        "accent": "Mandarin Chinese"
+      },
+      "description": "Kokoro Mandarin Chinese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:zf_xiaoni",
+      "nativeVoiceId": "zf_xiaoni",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "zh"
+        ],
+        "accent": "Mandarin Chinese"
+      },
+      "description": "Kokoro Mandarin Chinese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:zf_xiaoxiao",
+      "nativeVoiceId": "zf_xiaoxiao",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "zh"
+        ],
+        "accent": "Mandarin Chinese"
+      },
+      "description": "Kokoro Mandarin Chinese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:zf_xiaoyi",
+      "nativeVoiceId": "zf_xiaoyi",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "zh"
+        ],
+        "accent": "Mandarin Chinese"
+      },
+      "description": "Kokoro Mandarin Chinese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:zm_yunjian",
+      "nativeVoiceId": "zm_yunjian",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "zh"
+        ],
+        "accent": "Mandarin Chinese"
+      },
+      "description": "Kokoro Mandarin Chinese male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:zm_yunxi",
+      "nativeVoiceId": "zm_yunxi",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "zh"
+        ],
+        "accent": "Mandarin Chinese"
+      },
+      "description": "Kokoro Mandarin Chinese male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:zm_yunxia",
+      "nativeVoiceId": "zm_yunxia",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "zh"
+        ],
+        "accent": "Mandarin Chinese"
+      },
+      "description": "Kokoro Mandarin Chinese male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:zm_yunyang",
+      "nativeVoiceId": "zm_yunyang",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "zh"
+        ],
+        "accent": "Mandarin Chinese"
+      },
+      "description": "Kokoro Mandarin Chinese male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:ef_dora",
+      "nativeVoiceId": "ef_dora",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "es"
+        ],
+        "accent": "Spanish"
+      },
+      "description": "Kokoro Spanish female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:em_alex",
+      "nativeVoiceId": "em_alex",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "es"
+        ],
+        "accent": "Spanish"
+      },
+      "description": "Kokoro Spanish male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:em_santa",
+      "nativeVoiceId": "em_santa",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "es"
+        ],
+        "accent": "Spanish"
+      },
+      "description": "Kokoro Spanish male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:ff_siwis",
+      "nativeVoiceId": "ff_siwis",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "fr"
+        ],
+        "accent": "French"
+      },
+      "description": "Kokoro French female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:hf_alpha",
+      "nativeVoiceId": "hf_alpha",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "hi"
+        ],
+        "accent": "Hindi"
+      },
+      "description": "Kokoro Hindi female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:hf_beta",
+      "nativeVoiceId": "hf_beta",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "hi"
+        ],
+        "accent": "Hindi"
+      },
+      "description": "Kokoro Hindi female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:hm_omega",
+      "nativeVoiceId": "hm_omega",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "hi"
+        ],
+        "accent": "Hindi"
+      },
+      "description": "Kokoro Hindi male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:hm_psi",
+      "nativeVoiceId": "hm_psi",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "hi"
+        ],
+        "accent": "Hindi"
+      },
+      "description": "Kokoro Hindi male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:if_sara",
+      "nativeVoiceId": "if_sara",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "it"
+        ],
+        "accent": "Italian"
+      },
+      "description": "Kokoro Italian female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:im_nicola",
+      "nativeVoiceId": "im_nicola",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "it"
+        ],
+        "accent": "Italian"
+      },
+      "description": "Kokoro Italian male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:pf_dora",
+      "nativeVoiceId": "pf_dora",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "pt"
+        ],
+        "accent": "Brazilian Portuguese"
+      },
+      "description": "Kokoro Brazilian Portuguese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:pm_alex",
+      "nativeVoiceId": "pm_alex",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "pt"
+        ],
+        "accent": "Brazilian Portuguese"
+      },
+      "description": "Kokoro Brazilian Portuguese male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:pm_santa",
+      "nativeVoiceId": "pm_santa",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "pt"
+        ],
+        "accent": "Brazilian Portuguese"
+      },
+      "description": "Kokoro Brazilian Portuguese male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
     {
       "id": "openai:alloy",
       "provider": "openai",
@@ -1375,16 +2862,18 @@
         "fish:s2.1-pro",
         "fish:s2.1-pro-free",
         "fish:s2-pro",
-        "fish:s1"
+        "fish:s1",
+        "openrouter:fish-audio/s2.1-pro-free:free"
       ],
       "compatibility": {
         "basis": "inferred-from-provider-reference-id-interface",
         "sourceIds": [
           "fish-tts-api",
-          "fish-sdk"
+          "fish-sdk",
+          "user-supplied-openrouter-catalogue"
         ],
         "synthesisTested": false,
-        "notes": "The API accepts a voice reference ID independently of the backend. No per-voice/backend compatibility matrix was published on the reviewed pages."
+        "notes": "The API accepts a voice reference ID independently of the backend. No per-voice/backend compatibility matrix was published on the reviewed pages. The OpenRouter mapping for fish-audio/s2.1-pro-free:free was supplied by the user."
       },
       "traits": {
         "presentation": "female",

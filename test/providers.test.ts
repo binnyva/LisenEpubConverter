@@ -210,6 +210,20 @@ describe('OpenRouter TTS provider', () => {
       provider: { options: { openai: { instructions: 'Warm and calm.' } } },
     });
   });
+
+  it('uses compatible voices from the bound shared library for a non-OpenAI model', async () => {
+    const { getTTSProvider } = await import('../src/providers/tts/openai.js');
+    const provider = getTTSProvider(
+      { provider: 'openrouter', model: 'fish-audio/s2.1-pro-free:free' },
+      path.resolve('library/voices.json'),
+    );
+
+    expect(provider.listVoices()).toContainEqual({
+      id: 'b347db033a6549378b48d00acb0d06cd',
+      sex: 'female',
+      description: 'Female voice suited to meditation.',
+    });
+  });
 });
 
 describe('custom TTS voice catalogues', () => {
