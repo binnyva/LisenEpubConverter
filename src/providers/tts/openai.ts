@@ -1,47 +1,52 @@
 import OpenAI from 'openai';
 import { config } from '../../config.js';
 import type { SynthesisRequest, TTSProvider, Voice } from './types.js';
+import { OpenRouterTTSProvider } from './openrouter.js';
+import { OPENAI_VOICES } from './voices.js';
 
-const VOICES: Voice[] = [
-  { id: 'alloy', sex: 'neutral', description: 'clear, balanced, androgynous' },
-  { id: 'ash', sex: 'male', description: 'warm adult male' },
-  { id: 'ballad', sex: 'male', description: 'expressive younger male, British lean' },
-  { id: 'coral', sex: 'female', description: 'bright, friendly adult female' },
-  { id: 'echo', sex: 'male', description: 'steady, articulate male' },
-  { id: 'fable', sex: 'neutral', description: 'animated storyteller, British accent' },
-  { id: 'onyx', sex: 'male', description: 'deep, authoritative male' },
-  { id: 'nova', sex: 'female', description: 'energetic younger female' },
-  { id: 'sage', sex: 'female', description: 'calm, mature female' },
-  { id: 'shimmer', sex: 'female', description: 'soft, gentle female' },
-  { id: 'verse', sex: 'male', description: 'versatile expressive male' },
-];
+export interface TTSProviderTarget {
+  provider: 'openai' | 'openrouter' | 'fish';
+  model: string;
+}
 
 export class OpenAITTSProvider implements TTSProvider {
   readonly id = 'openai';
   readonly maxChars = config.ttsMaxChars;
   private client = new OpenAI();
+  private readonly model: string;
+
+  constructor(target: TTSProviderTarget = { provider: config.ttsProvider, model: config.ttsModel }) {
+    this.model = target.model;
+  }
 
   listVoices(): Voice[] {
-    return VOICES;
+    return OPENAI_VOICES;
   }
 
   async synthesize(req: SynthesisRequest): Promise<Buffer> {
     const res = await this.client.audio.speech.create({
-      model: config.ttsModel,
+      model: this.model,
       voice: req.voiceId,
       input: req.text,
       ...(req.instructions ? { instructions: req.instructions } : {}),
       response_format: 'mp3',
-    });
+    }, { signal: req.signal });
     return Buffer.from(await res.arrayBuffer());
   }
 }
 
-export function getTTSProvider(): TTSProvider {
-  switch (config.ttsProvider) {
+export function getTTSProvider(
+  target: TTSProviderTarget = { provider: config.ttsProvider, model: config.ttsModel },
+  voiceLibraryFile?: string,
+): TTSProvider {
+  switch (target.provider) {
     case 'openai':
-      return new OpenAITTSProvider();
+      return new OpenAITTSProvider(target);
+    case 'openrouter':
+      return new OpenRouterTTSProvider(target, voiceLibraryFile);
+    case 'fish':
+      throw new Error('Fish voice bindings are supported, but the Fish synthesis adapter is not implemented yet.');
     default:
-      throw new Error(`Unknown TTS provider: ${config.ttsProvider}`);
+      throw new Error(`Unknown TTS provider: ${target.provider}`);
   }
 }

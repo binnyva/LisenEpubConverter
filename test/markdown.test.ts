@@ -43,6 +43,11 @@ describe('htmlToMarkdown', () => {
     const md = htmlToMarkdown('<style>p{color:red}</style><script>alert(1)</script><p>Text.</p>');
     expect(md).toBe('Text.');
   });
+
+  it('normalizes non-breaking spaces', () => {
+    const md = htmlToMarkdown('<p>One&nbsp;two&#x202f;three</p>');
+    expect(md).toBe('One two three');
+  });
 });
 
 describe('markdownToSpeakable', () => {
@@ -57,5 +62,9 @@ describe('markdownToSpeakable', () => {
 
   it('keeps numbered list numbers spoken', () => {
     expect(markdownToSpeakable('1. First step')).toBe('1. First step');
+  });
+
+  it('normalizes non-breaking spaces before synthesis', () => {
+    expect(markdownToSpeakable('One\u00a0two\u202fthree')).toBe('One two three');
   });
 });

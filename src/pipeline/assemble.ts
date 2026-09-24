@@ -1,23 +1,26 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { config } from '../config.js';
+import { reportProgress } from '../util/progress.js';
+import { taskCancellationSignal, throwIfTaskCancelled } from '../util/cancellation.js';
 import type { WorkDir } from '../state.js';
 import type { BookMetadata, ChapterAudioManifest } from '../types.js';
 
-function ffmpeg(args: string[]): void {
-  execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args], {
-    stdio: ['ignore', 'inherit', 'inherit'],
-  });
+const execFileAsync = promisify(execFile);
+
+async function ffmpeg(args: string[]): Promise<void> {
+  await execFileAsync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args], { signal: taskCancellationSignal() });
 }
 
-function durationOf(file: string): number {
-  const out = execFileSync(
+async function durationOf(file: string): Promise<number> {
+  const { stdout } = await execFileAsync(
     'ffprobe',
     ['-v', 'error', '-show_entries', 'format=duration', '-of', 'csv=p=0', file],
-    { encoding: 'utf8' }
+    { encoding: 'utf8', signal: taskCancellationSignal() }
   );
-  return parseFloat(out.trim());
+  return parseFloat(stdout.trim());
 }
 
 function escapeMeta(s: string): string {
@@ -25,25 +28,40 @@ function escapeMeta(s: string): string {
 }
 
 /**
- * Stage 7: concatenate cached segments into per-chapter M4A files, then all
+ * Stage 9: concatenate cached segments into per-chapter M4A files, then all
  * chapters into a single M4B with chapter markers, tags and cover art.
  */
-export function runAssemble(work: WorkDir, outDir: string): string {
+export async function runAssemble(work: WorkDir, outDir: string, chapterIndexes?: number[]): Promise<string> {
+  throwIfTaskCancelled();
+  reportProgress({ activity: 'Reading synthesized chapter manifests' });
   const meta = work.readJson<BookMetadata>('metadata.json');
   work.dir('audio');
 
   const manifests = fs
     .readdirSync(work.path('audio'))
     .filter((f) => f.endsWith('-segments.json'))
+    .filter((f) => !chapterIndexes || chapterIndexes.includes(Number.parseInt(f, 10)))
     .sort()
     .map((f) => work.readJson<ChapterAudioManifest>(`audio/${f}`));
   if (manifests.length === 0) throw new Error('No synthesized chapters found — run synth first.');
 
   // 1. Per-chapter concat + AAC encode (skipped when the chapter m4a exists).
+  const chapterTitle = (index: number): string =>
+    meta.chapters.find((c) => c.index === index)?.title ?? `Chapter ${index}`;
+  let encoded = 0;
   for (const manifest of manifests) {
+    throwIfTaskCancelled();
     const chapterFile = work.path('audio', `${String(manifest.index).padStart(2, '0')}.m4a`);
-    if (fs.existsSync(chapterFile)) continue;
-    console.log(`  Encoding chapter ${manifest.index} (${manifest.segments.length} segments)`);
+    const progress = (activity: string) => reportProgress({ activity,
+      chapterIndex: manifest.index, chapterTitle: chapterTitle(manifest.index),
+      completedUnits: encoded, totalUnits: manifests.length, unit: 'chapters encoded',
+    });
+    if (fs.existsSync(chapterFile)) {
+      encoded++;
+      progress('Reusing encoded chapter');
+      continue;
+    }
+    progress(`Encoding ${manifest.segments.length} audio segments — waiting for ffmpeg`);
 
     const listFile = work.path('audio', `concat-${manifest.index}.txt`);
     fs.writeFileSync(
@@ -52,27 +70,37 @@ export function runAssemble(work: WorkDir, outDir: string): string {
         .map((h) => `file '${work.path('audio-cache', `${h}.mp3`).replace(/'/g, "'\\''")}'`)
         .join('\n')
     );
-    ffmpeg([
-      '-f', 'concat', '-safe', '0', '-i', listFile,
-      '-c:a', 'aac', '-b:a', config.audioBitrate, '-ar', '44100', '-ac', '1',
-      chapterFile,
-    ]);
+    // Publish only successful encodes so a failed request can be resumed safely.
+    const pendingFile = chapterFile + '.tmp.m4a';
+    try {
+      await ffmpeg([
+        '-f', 'concat', '-safe', '0', '-i', listFile,
+        '-c:a', 'aac', '-b:a', config.audioBitrate, '-ar', '44100', '-ac', '1',
+        pendingFile,
+      ]);
+      fs.renameSync(pendingFile, chapterFile);
+    } finally {
+      fs.rmSync(pendingFile, { force: true });
+    }
     fs.rmSync(listFile);
+    encoded++;
+    progress('Chapter encoding complete');
   }
 
   // 2. Chapter markers from encoded durations.
-  const chapterTitle = (index: number): string =>
-    meta.chapters.find((c) => c.index === index)?.title ?? `Chapter ${index}`;
+  reportProgress({ activity: 'Reading encoded durations and building chapter markers', completedUnits: 0, totalUnits: manifests.length, unit: 'chapter durations read' });
 
   let ffmeta = `;FFMETADATA1\ntitle=${escapeMeta(meta.title)}\nartist=${escapeMeta(meta.author)}\nalbum=${escapeMeta(meta.title)}\ngenre=Audiobook\n`;
   let cursorMs = 0;
   const chapterFiles: string[] = [];
   for (const manifest of manifests) {
+    throwIfTaskCancelled();
     const file = work.path('audio', `${String(manifest.index).padStart(2, '0')}.m4a`);
     chapterFiles.push(file);
-    const durMs = Math.round(durationOf(file) * 1000);
+    const durMs = Math.round(await durationOf(file) * 1000);
     ffmeta += `\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=${cursorMs}\nEND=${cursorMs + durMs}\ntitle=${escapeMeta(chapterTitle(manifest.index))}\n`;
     cursorMs += durMs;
+    reportProgress({ activity: 'Building chapter markers', completedUnits: chapterFiles.length, totalUnits: manifests.length, unit: 'chapter durations read' });
   }
   const ffmetaFile = work.path('audio', 'ffmetadata.txt');
   fs.writeFileSync(ffmetaFile, ffmeta);
@@ -84,13 +112,18 @@ export function runAssemble(work: WorkDir, outDir: string): string {
     chapterFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join('\n')
   );
   const bookM4a = work.path('audio', 'book.m4a');
-  ffmpeg(['-f', 'concat', '-safe', '0', '-i', concatList, '-c', 'copy', bookM4a]);
+  reportProgress({ activity: 'Joining encoded chapters — waiting for ffmpeg' });
+  await ffmpeg(['-f', 'concat', '-safe', '0', '-i', concatList, '-c', 'copy', bookM4a]);
+  throwIfTaskCancelled();
   fs.rmSync(concatList);
 
   // 4. Mux metadata + cover into the final .m4b.
   fs.mkdirSync(outDir, { recursive: true });
   const safeTitle = meta.title.replace(/[\\/:*?"<>|]/g, '-').trim() || 'book';
-  const outFile = path.resolve(outDir, `${safeTitle}.m4b`);
+  const selectionLabel = chapterIndexes?.length
+    ? ` - chapters ${[...chapterIndexes].sort((a, b) => a - b).join('-')}`
+    : '';
+  const outFile = path.resolve(outDir, `${safeTitle}${selectionLabel}.m4b`);
 
   const args = ['-i', bookM4a, '-i', ffmetaFile];
   if (meta.coverFile && fs.existsSync(work.path(meta.coverFile))) {
@@ -100,8 +133,11 @@ export function runAssemble(work: WorkDir, outDir: string): string {
     args.push('-map', '0:a');
   }
   args.push('-map_metadata', '1', '-c:a', 'copy', '-f', 'mp4', outFile);
-  ffmpeg(args);
+  reportProgress({ activity: 'Writing M4B with metadata and cover art — waiting for ffmpeg' });
+  await ffmpeg(args);
+  throwIfTaskCancelled();
 
   fs.rmSync(bookM4a);
+  reportProgress({ activity: `Audiobook saved: ${outFile}`, phase: 'completed' });
   return outFile;
 }

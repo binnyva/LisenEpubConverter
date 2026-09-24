@@ -5,15 +5,18 @@ import { htmlToMarkdown } from '../epub/markdown.js';
 import { countWords } from '../util/text.js';
 import type { WorkDir } from '../state.js';
 import type { BookMetadata, ExtractedChapter } from '../types.js';
+import { reportProgress } from '../util/progress.js';
 
 /** Stage 1: EPUB -> one markdown file per spine chapter + metadata.json + cover. */
 export function runExtract(epubPath: string, work: WorkDir): BookMetadata {
+  reportProgress({ activity: 'Opening EPUB and reading its contents' });
   const epub = parseEpub(epubPath);
   const chaptersDir = work.dir('chapters');
   fs.rmSync(chaptersDir, { recursive: true, force: true });
   work.dir('chapters');
 
   const chapters: ExtractedChapter[] = [];
+  reportProgress({ activity: 'Extracting chapter text', completedUnits: 0, totalUnits: epub.spine.length, unit: 'chapters extracted' });
   epub.spine.forEach((item, index) => {
     const markdown = htmlToMarkdown(item.html);
 
@@ -41,6 +44,7 @@ export function runExtract(epubPath: string, work: WorkDir): BookMetadata {
       words: countWords(markdown),
       isNav: item.isNav,
     });
+    reportProgress({ activity: `Extracted ${title}`, completedUnits: index + 1, totalUnits: epub.spine.length, unit: 'chapters extracted' });
   });
 
   let coverFile: string | undefined;
@@ -57,5 +61,6 @@ export function runExtract(epubPath: string, work: WorkDir): BookMetadata {
     chapters,
   };
   work.writeJson('metadata.json', metadata);
+  reportProgress({ activity: 'Chapters, metadata and available cover art saved', phase: 'completed', completedUnits: chapters.length, totalUnits: chapters.length, unit: 'chapters extracted' });
   return metadata;
 }

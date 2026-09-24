@@ -1,0 +1,3325 @@
+{
+  "version": 2,
+  "updatedAt": "2026-09-15T23:44:00Z",
+  "description": "Shared voice catalogue: OpenAI built-in speech voices, Fish Audio default voices, and OpenRouter Kokoro preset voices.",
+  "scope": {
+    "providers": [
+      "openai",
+      "fish",
+      "openrouter"
+    ],
+    "voiceCount": 74,
+    "modelCount": 9,
+    "includesCustomVoices": false,
+    "includesCommunityVoices": false
+  },
+  "integration": {
+    "status": "listing-and-bindings-supported",
+    "notes": "The library loader and voices apply stage support this version, including Fish bindings and unknown limits. Fish synthesis and version-2 catalogue refresh/import are not implemented."
+  },
+  "conventions": {
+    "identity": "Voice IDs are provider-qualified and independent of backend models; nativeVoiceId is the API value. models references model record IDs.",
+    "unknown": "Unknown scalar traits use 'unknown'; empty trait arrays mean no verified values. A null limit means unknown, never unlimited.",
+    "language": "Voice traits describe published voice languages. Model language sets describe synthesis coverage; neither guarantees an accent.",
+    "instructions": "supportsInstructions means a separate instructions field. Fish delivery cues are embedded in text and require adapter translation.",
+    "provenance": "Bundled means manually curated from the cited provider pages. No automatic refresh or authenticated catalogue discovery was run.",
+    "availability": "Listed means present in public provider documentation or the default catalogue at refreshedAt, not verified account access or a successful synthesis request.",
+    "annotations": "Reserved for user annotations; preserve separately when refreshing provider metadata."
+  },
+  "notes": [
+    "OpenAI voice presentation, age, accent, and tone are not specified in the reviewed official guide, so they remain unknown.",
+    "Only named OpenAI TTS model aliases are catalogued; dated snapshots and Realtime voices are outside this initial manifest.",
+    "Fish default membership was checked on the rendered default-voices page; all seven profiles are published by Fish Official.",
+    "Fish sample media URLs are signed and expire after one hour. Stable profile preview links are retained instead.",
+    "Fish's total request text limit was not established. The documented chunk_length range of 100–300 is a processing option, not a request-length limit.",
+    "Fish reference-ID compatibility is inferred from the shared API contract and is explicitly marked on each voice.",
+    "Hannah's profile says conversation specialist; the default list says conversion specialist. The profile description is used here.",
+    "Catalogue creation made no synthesis requests.",
+    "Kokoro preset voices, language assignments, and presentation are transcribed from the published voice list; no OpenRouter synthesis request was made."
+  ],
+  "sources": [
+    {
+      "id": "openai-tts-guide",
+      "url": "https://developers.openai.com/api/docs/guides/text-to-speech",
+      "accessedAt": "2026-09-09T16:46:31Z"
+    },
+    {
+      "id": "openai-speech-api",
+      "url": "https://developers.openai.com/api/reference/resources/audio/subresources/speech/methods/create",
+      "accessedAt": "2026-09-09T16:46:31Z"
+    },
+    {
+      "id": "openai-mini-tts",
+      "url": "https://developers.openai.com/api/docs/models/gpt-4o-mini-tts",
+      "accessedAt": "2026-09-09T16:46:31Z"
+    },
+    {
+      "id": "fish-defaults",
+      "url": "https://fish.audio/app/default-voices/",
+      "accessedAt": "2026-09-09T16:46:31Z"
+    },
+    {
+      "id": "fish-tts-api",
+      "url": "https://docs.fish.audio/api-reference/endpoint/openapi-v1/text-to-speech",
+      "accessedAt": "2026-09-09T16:46:31Z"
+    },
+    {
+      "id": "fish-models",
+      "url": "https://docs.fish.audio/developer-guide/models-pricing/models-overview",
+      "accessedAt": "2026-09-09T16:46:31Z"
+    },
+    {
+      "id": "fish-sdk",
+      "url": "https://docs.fish.audio/api-reference/sdk/javascript/api-reference",
+      "accessedAt": "2026-09-09T16:46:31Z"
+    },
+    {
+      "id": "fish-selene",
+      "url": "https://fish.audio/app/m/b347db033a6549378b48d00acb0d06cd/",
+      "accessedAt": "2026-09-09T16:46:31Z"
+    },
+    {
+      "id": "fish-adrian",
+      "url": "https://fish.audio/app/m/bf322df2096a46f18c579d0baa36f41d/",
+      "accessedAt": "2026-09-09T16:46:31Z"
+    },
+    {
+      "id": "fish-sarah",
+      "url": "https://fish.audio/app/m/933563129e564b19a115bedd57b7406a/",
+      "accessedAt": "2026-09-09T16:46:31Z"
+    },
+    {
+      "id": "fish-ethan",
+      "url": "https://fish.audio/app/m/536d3a5e000945adb7038665781a4aca/",
+      "accessedAt": "2026-09-09T16:46:31Z"
+    },
+    {
+      "id": "fish-laura",
+      "url": "https://fish.audio/app/m/e3cd384158934cc9a01029cd7d278634/",
+      "accessedAt": "2026-09-09T16:46:31Z"
+    },
+    {
+      "id": "fish-jordan",
+      "url": "https://fish.audio/app/m/79d0bd3e4e5444b18f7b6d89b5927bf1/",
+      "accessedAt": "2026-09-09T16:46:31Z"
+    },
+    {
+      "id": "fish-hannah",
+      "url": "https://fish.audio/app/m/9a9cf47702da476aa4629e2506d4a857/",
+      "accessedAt": "2026-09-09T16:46:31Z"
+    },
+    {
+      "id": "kokoro-voices",
+      "url": "https://huggingface.co/hexgrad/Kokoro-82M/blob/main/VOICES.md",
+      "accessedAt": "2026-09-15T23:44:00Z"
+    },
+    {
+      "id": "openrouter-kokoro",
+      "url": "https://openrouter.ai/hexgrad/kokoro-82m",
+      "accessedAt": "2026-09-15T23:44:00Z"
+    }
+  ],
+  "languageSets": [
+    {
+      "id": "openai-tts",
+      "languages": [
+        "af",
+        "ar",
+        "hy",
+        "az",
+        "be",
+        "bs",
+        "bg",
+        "ca",
+        "zh",
+        "hr",
+        "cs",
+        "da",
+        "nl",
+        "en",
+        "et",
+        "fi",
+        "fr",
+        "gl",
+        "de",
+        "el",
+        "he",
+        "hi",
+        "hu",
+        "is",
+        "id",
+        "it",
+        "ja",
+        "kn",
+        "kk",
+        "ko",
+        "lv",
+        "lt",
+        "mk",
+        "ms",
+        "mr",
+        "mi",
+        "ne",
+        "no",
+        "fa",
+        "pl",
+        "pt",
+        "ro",
+        "ru",
+        "sr",
+        "sk",
+        "sl",
+        "es",
+        "sw",
+        "sv",
+        "tl",
+        "ta",
+        "th",
+        "tr",
+        "uk",
+        "ur",
+        "vi",
+        "cy"
+      ],
+      "sourceIds": [
+        "openai-tts-guide"
+      ]
+    },
+    {
+      "id": "fish-s1",
+      "languages": [
+        "en",
+        "zh",
+        "ja",
+        "de",
+        "fr",
+        "es",
+        "ko",
+        "ar",
+        "ru",
+        "nl",
+        "it",
+        "pl",
+        "pt"
+      ],
+      "sourceIds": [
+        "fish-models"
+      ]
+    },
+    {
+      "id": "fish-s2-pro",
+      "languages": null,
+      "publishedCount": {
+        "min": 80,
+        "exact": null
+      },
+      "sourceIds": [
+        "fish-models"
+      ]
+    },
+    {
+      "id": "fish-s2.1-pro",
+      "languages": null,
+      "publishedCount": {
+        "min": 83,
+        "exact": 83
+      },
+      "sourceIds": [
+        "fish-models"
+      ]
+    },
+    {
+      "id": "kokoro-82m",
+      "languages": [
+        "en",
+        "ja",
+        "zh",
+        "es",
+        "fr",
+        "hi",
+        "it",
+        "pt"
+      ],
+      "publishedCount": {
+        "min": 54,
+        "exact": 54
+      },
+      "sourceIds": [
+        "kokoro-voices",
+        "openrouter-kokoro"
+      ]
+    }
+  ],
+  "models": [
+    {
+      "id": "openai:gpt-4o-mini-tts",
+      "provider": "openai",
+      "model": "gpt-4o-mini-tts",
+      "availability": "listed",
+      "api": {
+        "endpoint": "https://api.openai.com/v1/audio/speech",
+        "modelParameter": "model",
+        "modelLocation": "body",
+        "voiceParameter": "voice"
+      },
+      "supportsInstructions": true,
+      "inputLimits": [
+        {
+          "field": "input",
+          "max": 4096,
+          "unit": "characters",
+          "scope": "request"
+        },
+        {
+          "field": "input",
+          "max": 2000,
+          "unit": "tokens",
+          "scope": "model"
+        },
+        {
+          "field": "instructions",
+          "max": 4096,
+          "unit": "characters",
+          "scope": "request"
+        }
+      ],
+      "controls": {
+        "instructions": {
+          "supported": true,
+          "parameter": "instructions",
+          "placement": "separate-field"
+        },
+        "speed": {
+          "supported": true,
+          "parameter": "speed",
+          "min": 0.25,
+          "max": 4,
+          "default": 1,
+          "unit": "multiplier"
+        }
+      },
+      "outputFormats": [
+        "mp3",
+        "opus",
+        "aac",
+        "flac",
+        "wav",
+        "pcm"
+      ],
+      "defaultOutputFormat": "mp3",
+      "languageSetId": "openai-tts",
+      "optimizedLanguages": [
+        "en"
+      ],
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "openai-tts-guide",
+          "openai-speech-api",
+          "openai-mini-tts"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openai:tts-1",
+      "provider": "openai",
+      "model": "tts-1",
+      "availability": "listed",
+      "api": {
+        "endpoint": "https://api.openai.com/v1/audio/speech",
+        "modelParameter": "model",
+        "modelLocation": "body",
+        "voiceParameter": "voice"
+      },
+      "supportsInstructions": false,
+      "inputLimits": [
+        {
+          "field": "input",
+          "max": 4096,
+          "unit": "characters",
+          "scope": "request"
+        }
+      ],
+      "controls": {
+        "instructions": {
+          "supported": false
+        },
+        "speed": {
+          "supported": true,
+          "parameter": "speed",
+          "min": 0.25,
+          "max": 4,
+          "default": 1,
+          "unit": "multiplier"
+        }
+      },
+      "outputFormats": [
+        "mp3",
+        "opus",
+        "aac",
+        "flac",
+        "wav",
+        "pcm"
+      ],
+      "defaultOutputFormat": "mp3",
+      "languageSetId": "openai-tts",
+      "optimizedLanguages": [
+        "en"
+      ],
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "openai-tts-guide",
+          "openai-speech-api"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openai:tts-1-hd",
+      "provider": "openai",
+      "model": "tts-1-hd",
+      "availability": "listed",
+      "api": {
+        "endpoint": "https://api.openai.com/v1/audio/speech",
+        "modelParameter": "model",
+        "modelLocation": "body",
+        "voiceParameter": "voice"
+      },
+      "supportsInstructions": false,
+      "inputLimits": [
+        {
+          "field": "input",
+          "max": 4096,
+          "unit": "characters",
+          "scope": "request"
+        }
+      ],
+      "controls": {
+        "instructions": {
+          "supported": false
+        },
+        "speed": {
+          "supported": true,
+          "parameter": "speed",
+          "min": 0.25,
+          "max": 4,
+          "default": 1,
+          "unit": "multiplier"
+        }
+      },
+      "outputFormats": [
+        "mp3",
+        "opus",
+        "aac",
+        "flac",
+        "wav",
+        "pcm"
+      ],
+      "defaultOutputFormat": "mp3",
+      "languageSetId": "openai-tts",
+      "optimizedLanguages": [
+        "en"
+      ],
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "openai-tts-guide",
+          "openai-speech-api"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "fish:s2.1-pro",
+      "provider": "fish",
+      "model": "s2.1-pro",
+      "availability": "listed",
+      "api": {
+        "endpoint": "https://api.fish.audio/v1/tts",
+        "modelParameter": "model",
+        "modelLocation": "header",
+        "voiceParameter": "reference_id"
+      },
+      "supportsInstructions": false,
+      "inputLimits": [
+        {
+          "field": "text",
+          "max": null,
+          "unit": "characters",
+          "scope": "request",
+          "status": "not-established-by-reviewed-docs"
+        }
+      ],
+      "controls": {
+        "instructions": {
+          "supported": false
+        },
+        "inlineDelivery": {
+          "supported": true,
+          "parameter": "text",
+          "placement": "inline",
+          "syntax": "[natural language direction]"
+        },
+        "speed": {
+          "supported": true,
+          "parameter": "prosody.speed",
+          "min": 0.5,
+          "max": 2,
+          "default": 1,
+          "unit": "multiplier"
+        },
+        "volume": {
+          "supported": true,
+          "parameter": "prosody.volume",
+          "min": -20,
+          "max": 20,
+          "default": 0,
+          "unit": "dB"
+        },
+        "multiSpeaker": {
+          "supported": true
+        }
+      },
+      "outputFormats": [
+        "wav",
+        "pcm",
+        "mp3",
+        "opus"
+      ],
+      "defaultOutputFormat": "mp3",
+      "languageSetId": "fish-s2.1-pro",
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "fish-tts-api",
+          "fish-models",
+          "fish-sdk"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "fish:s2.1-pro-free",
+      "provider": "fish",
+      "model": "s2.1-pro-free",
+      "availability": "listed",
+      "api": {
+        "endpoint": "https://api.fish.audio/v1/tts",
+        "modelParameter": "model",
+        "modelLocation": "header",
+        "voiceParameter": "reference_id"
+      },
+      "supportsInstructions": false,
+      "inputLimits": [
+        {
+          "field": "text",
+          "max": null,
+          "unit": "characters",
+          "scope": "request",
+          "status": "not-established-by-reviewed-docs"
+        }
+      ],
+      "controls": {
+        "instructions": {
+          "supported": false
+        },
+        "inlineDelivery": {
+          "supported": true,
+          "parameter": "text",
+          "placement": "inline",
+          "syntax": "[natural language direction]"
+        },
+        "speed": {
+          "supported": true,
+          "parameter": "prosody.speed",
+          "min": 0.5,
+          "max": 2,
+          "default": 1,
+          "unit": "multiplier"
+        },
+        "volume": {
+          "supported": true,
+          "parameter": "prosody.volume",
+          "min": -20,
+          "max": 20,
+          "default": 0,
+          "unit": "dB"
+        },
+        "multiSpeaker": {
+          "supported": true
+        }
+      },
+      "outputFormats": [
+        "wav",
+        "pcm",
+        "mp3",
+        "opus"
+      ],
+      "defaultOutputFormat": "mp3",
+      "languageSetId": "fish-s2.1-pro",
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "fish-tts-api",
+          "fish-models",
+          "fish-sdk"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openrouter:fish-audio/s2.1-pro-free:free",
+      "provider": "openrouter",
+      "model": "fish-audio/s2.1-pro-free:free",
+      "availability": "listed",
+      "supportsInstructions": false,
+      "inputLimits": [
+        {
+          "field": "input",
+          "max": null,
+          "unit": "characters",
+          "scope": "request",
+          "status": "not-established-by-reviewed-docs"
+        }
+      ],
+      "provenance": {
+        "method": "user-supplied",
+        "sourceIds": [
+          "user-supplied-openrouter-catalogue"
+        ],
+        "notes": "Known OpenRouter model and voice mapping supplied by the user; synthesis has not been tested by Lisen."
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m",
+      "provider": "openrouter",
+      "model": "hexgrad/kokoro-82m",
+      "availability": "listed",
+      "supportsInstructions": false,
+      "inputLimits": [
+        {
+          "field": "input",
+          "max": 4096,
+          "unit": "tokens",
+          "scope": "request",
+          "status": "provider-documented"
+        }
+      ],
+      "languageSetId": "kokoro-82m",
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-15T23:44:00Z",
+        "sourceIds": [
+          "kokoro-voices",
+          "openrouter-kokoro"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "fish:s2-pro",
+      "provider": "fish",
+      "model": "s2-pro",
+      "availability": "listed",
+      "api": {
+        "endpoint": "https://api.fish.audio/v1/tts",
+        "modelParameter": "model",
+        "modelLocation": "header",
+        "voiceParameter": "reference_id"
+      },
+      "supportsInstructions": false,
+      "inputLimits": [
+        {
+          "field": "text",
+          "max": null,
+          "unit": "characters",
+          "scope": "request",
+          "status": "not-established-by-reviewed-docs"
+        }
+      ],
+      "controls": {
+        "instructions": {
+          "supported": false
+        },
+        "inlineDelivery": {
+          "supported": true,
+          "parameter": "text",
+          "placement": "inline",
+          "syntax": "[natural language direction]"
+        },
+        "speed": {
+          "supported": true,
+          "parameter": "prosody.speed",
+          "min": 0.5,
+          "max": 2,
+          "default": 1,
+          "unit": "multiplier"
+        },
+        "volume": {
+          "supported": true,
+          "parameter": "prosody.volume",
+          "min": -20,
+          "max": 20,
+          "default": 0,
+          "unit": "dB"
+        },
+        "multiSpeaker": {
+          "supported": true
+        }
+      },
+      "outputFormats": [
+        "wav",
+        "pcm",
+        "mp3",
+        "opus"
+      ],
+      "defaultOutputFormat": "mp3",
+      "languageSetId": "fish-s2-pro",
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "fish-tts-api",
+          "fish-models",
+          "fish-sdk"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "fish:s1",
+      "provider": "fish",
+      "model": "s1",
+      "availability": "listed",
+      "api": {
+        "endpoint": "https://api.fish.audio/v1/tts",
+        "modelParameter": "model",
+        "modelLocation": "header",
+        "voiceParameter": "reference_id"
+      },
+      "supportsInstructions": false,
+      "inputLimits": [
+        {
+          "field": "text",
+          "max": null,
+          "unit": "characters",
+          "scope": "request",
+          "status": "not-established-by-reviewed-docs"
+        }
+      ],
+      "controls": {
+        "instructions": {
+          "supported": false
+        },
+        "inlineDelivery": {
+          "supported": true,
+          "parameter": "text",
+          "placement": "inline",
+          "syntax": "(emotion)"
+        },
+        "speed": {
+          "supported": true,
+          "parameter": "prosody.speed",
+          "min": 0.5,
+          "max": 2,
+          "default": 1,
+          "unit": "multiplier"
+        },
+        "volume": {
+          "supported": true,
+          "parameter": "prosody.volume",
+          "min": -20,
+          "max": 20,
+          "default": 0,
+          "unit": "dB"
+        },
+        "multiSpeaker": {
+          "supported": false
+        }
+      },
+      "outputFormats": [
+        "wav",
+        "pcm",
+        "mp3",
+        "opus"
+      ],
+      "defaultOutputFormat": "mp3",
+      "languageSetId": "fish-s1",
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "fish-tts-api",
+          "fish-models",
+          "fish-sdk"
+        ]
+      },
+      "annotations": {}
+    }
+  ],
+  "voices": [
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_heart",
+      "nativeVoiceId": "af_heart",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_alloy",
+      "nativeVoiceId": "af_alloy",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_aoede",
+      "nativeVoiceId": "af_aoede",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_bella",
+      "nativeVoiceId": "af_bella",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_jessica",
+      "nativeVoiceId": "af_jessica",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_kore",
+      "nativeVoiceId": "af_kore",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_nicole",
+      "nativeVoiceId": "af_nicole",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_nova",
+      "nativeVoiceId": "af_nova",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_river",
+      "nativeVoiceId": "af_river",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_sarah",
+      "nativeVoiceId": "af_sarah",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:af_sky",
+      "nativeVoiceId": "af_sky",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_adam",
+      "nativeVoiceId": "am_adam",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_echo",
+      "nativeVoiceId": "am_echo",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_eric",
+      "nativeVoiceId": "am_eric",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_fenrir",
+      "nativeVoiceId": "am_fenrir",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_liam",
+      "nativeVoiceId": "am_liam",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_michael",
+      "nativeVoiceId": "am_michael",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_onyx",
+      "nativeVoiceId": "am_onyx",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_puck",
+      "nativeVoiceId": "am_puck",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:am_santa",
+      "nativeVoiceId": "am_santa",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "American English"
+      },
+      "description": "Kokoro American English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:bf_alice",
+      "nativeVoiceId": "bf_alice",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "British English"
+      },
+      "description": "Kokoro British English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:bf_emma",
+      "nativeVoiceId": "bf_emma",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "British English"
+      },
+      "description": "Kokoro British English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:bf_isabella",
+      "nativeVoiceId": "bf_isabella",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "British English"
+      },
+      "description": "Kokoro British English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:bf_lily",
+      "nativeVoiceId": "bf_lily",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "British English"
+      },
+      "description": "Kokoro British English female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:bm_daniel",
+      "nativeVoiceId": "bm_daniel",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "British English"
+      },
+      "description": "Kokoro British English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:bm_fable",
+      "nativeVoiceId": "bm_fable",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "British English"
+      },
+      "description": "Kokoro British English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:bm_george",
+      "nativeVoiceId": "bm_george",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "British English"
+      },
+      "description": "Kokoro British English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:bm_lewis",
+      "nativeVoiceId": "bm_lewis",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "British English"
+      },
+      "description": "Kokoro British English male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:jf_alpha",
+      "nativeVoiceId": "jf_alpha",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "ja"
+        ],
+        "accent": "Japanese"
+      },
+      "description": "Kokoro Japanese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:jf_gongitsune",
+      "nativeVoiceId": "jf_gongitsune",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "ja"
+        ],
+        "accent": "Japanese"
+      },
+      "description": "Kokoro Japanese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:jf_nezumi",
+      "nativeVoiceId": "jf_nezumi",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "ja"
+        ],
+        "accent": "Japanese"
+      },
+      "description": "Kokoro Japanese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:jf_tebukuro",
+      "nativeVoiceId": "jf_tebukuro",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "ja"
+        ],
+        "accent": "Japanese"
+      },
+      "description": "Kokoro Japanese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:jm_kumo",
+      "nativeVoiceId": "jm_kumo",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "ja"
+        ],
+        "accent": "Japanese"
+      },
+      "description": "Kokoro Japanese male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:zf_xiaobei",
+      "nativeVoiceId": "zf_xiaobei",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "zh"
+        ],
+        "accent": "Mandarin Chinese"
+      },
+      "description": "Kokoro Mandarin Chinese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:zf_xiaoni",
+      "nativeVoiceId": "zf_xiaoni",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "zh"
+        ],
+        "accent": "Mandarin Chinese"
+      },
+      "description": "Kokoro Mandarin Chinese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:zf_xiaoxiao",
+      "nativeVoiceId": "zf_xiaoxiao",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "zh"
+        ],
+        "accent": "Mandarin Chinese"
+      },
+      "description": "Kokoro Mandarin Chinese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:zf_xiaoyi",
+      "nativeVoiceId": "zf_xiaoyi",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "zh"
+        ],
+        "accent": "Mandarin Chinese"
+      },
+      "description": "Kokoro Mandarin Chinese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:zm_yunjian",
+      "nativeVoiceId": "zm_yunjian",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "zh"
+        ],
+        "accent": "Mandarin Chinese"
+      },
+      "description": "Kokoro Mandarin Chinese male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:zm_yunxi",
+      "nativeVoiceId": "zm_yunxi",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "zh"
+        ],
+        "accent": "Mandarin Chinese"
+      },
+      "description": "Kokoro Mandarin Chinese male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:zm_yunxia",
+      "nativeVoiceId": "zm_yunxia",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "zh"
+        ],
+        "accent": "Mandarin Chinese"
+      },
+      "description": "Kokoro Mandarin Chinese male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:zm_yunyang",
+      "nativeVoiceId": "zm_yunyang",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "zh"
+        ],
+        "accent": "Mandarin Chinese"
+      },
+      "description": "Kokoro Mandarin Chinese male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:ef_dora",
+      "nativeVoiceId": "ef_dora",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "es"
+        ],
+        "accent": "Spanish"
+      },
+      "description": "Kokoro Spanish female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:em_alex",
+      "nativeVoiceId": "em_alex",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "es"
+        ],
+        "accent": "Spanish"
+      },
+      "description": "Kokoro Spanish male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:em_santa",
+      "nativeVoiceId": "em_santa",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "es"
+        ],
+        "accent": "Spanish"
+      },
+      "description": "Kokoro Spanish male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:ff_siwis",
+      "nativeVoiceId": "ff_siwis",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "fr"
+        ],
+        "accent": "French"
+      },
+      "description": "Kokoro French female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:hf_alpha",
+      "nativeVoiceId": "hf_alpha",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "hi"
+        ],
+        "accent": "Hindi"
+      },
+      "description": "Kokoro Hindi female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:hf_beta",
+      "nativeVoiceId": "hf_beta",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "hi"
+        ],
+        "accent": "Hindi"
+      },
+      "description": "Kokoro Hindi female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:hm_omega",
+      "nativeVoiceId": "hm_omega",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "hi"
+        ],
+        "accent": "Hindi"
+      },
+      "description": "Kokoro Hindi male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:hm_psi",
+      "nativeVoiceId": "hm_psi",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "hi"
+        ],
+        "accent": "Hindi"
+      },
+      "description": "Kokoro Hindi male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:if_sara",
+      "nativeVoiceId": "if_sara",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "it"
+        ],
+        "accent": "Italian"
+      },
+      "description": "Kokoro Italian female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:im_nicola",
+      "nativeVoiceId": "im_nicola",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "it"
+        ],
+        "accent": "Italian"
+      },
+      "description": "Kokoro Italian male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:pf_dora",
+      "nativeVoiceId": "pf_dora",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "female",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "pt"
+        ],
+        "accent": "Brazilian Portuguese"
+      },
+      "description": "Kokoro Brazilian Portuguese female voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:pm_alex",
+      "nativeVoiceId": "pm_alex",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "pt"
+        ],
+        "accent": "Brazilian Portuguese"
+      },
+      "description": "Kokoro Brazilian Portuguese male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openrouter:hexgrad/kokoro-82m:pm_santa",
+      "nativeVoiceId": "pm_santa",
+      "models": [
+        "openrouter:hexgrad/kokoro-82m"
+      ],
+      "traits": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "pt"
+        ],
+        "accent": "Brazilian Portuguese"
+      },
+      "description": "Kokoro Brazilian Portuguese male voice.",
+      "source": "imported",
+      "availability": "listed",
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "kokoro-voices"
+        ],
+        "synthesisTested": false
+      }
+    },
+    {
+      "id": "openai:alloy",
+      "provider": "openai",
+      "name": "Alloy",
+      "nativeVoiceId": "alloy",
+      "category": "built-in",
+      "availability": "listed",
+      "models": [
+        "openai:gpt-4o-mini-tts",
+        "openai:tts-1",
+        "openai:tts-1-hd"
+      ],
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "openai-tts-guide"
+        ],
+        "synthesisTested": false
+      },
+      "traits": {
+        "presentation": "unknown",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "traitsEvidence": {
+        "basis": "provider-documentation",
+        "languagesMeaning": "Optimized language; additional synthesis languages are described by the model's languageSetId.",
+        "unknownFields": [
+          "presentation",
+          "age",
+          "tone",
+          "accent"
+        ]
+      },
+      "description": "OpenAI built-in voice.",
+      "recommendedByProvider": false,
+      "preview": {
+        "pageUrl": "https://developers.openai.com/api/docs/guides/text-to-speech#voice-options",
+        "audioUrl": null
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "openai-tts-guide"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openai:ash",
+      "provider": "openai",
+      "name": "Ash",
+      "nativeVoiceId": "ash",
+      "category": "built-in",
+      "availability": "listed",
+      "models": [
+        "openai:gpt-4o-mini-tts",
+        "openai:tts-1",
+        "openai:tts-1-hd"
+      ],
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "openai-tts-guide"
+        ],
+        "synthesisTested": false
+      },
+      "traits": {
+        "presentation": "unknown",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "traitsEvidence": {
+        "basis": "provider-documentation",
+        "languagesMeaning": "Optimized language; additional synthesis languages are described by the model's languageSetId.",
+        "unknownFields": [
+          "presentation",
+          "age",
+          "tone",
+          "accent"
+        ]
+      },
+      "description": "OpenAI built-in voice.",
+      "recommendedByProvider": false,
+      "preview": {
+        "pageUrl": "https://developers.openai.com/api/docs/guides/text-to-speech#voice-options",
+        "audioUrl": null
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "openai-tts-guide"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openai:ballad",
+      "provider": "openai",
+      "name": "Ballad",
+      "nativeVoiceId": "ballad",
+      "category": "built-in",
+      "availability": "listed",
+      "models": [
+        "openai:gpt-4o-mini-tts"
+      ],
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "openai-tts-guide"
+        ],
+        "synthesisTested": false
+      },
+      "traits": {
+        "presentation": "unknown",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "traitsEvidence": {
+        "basis": "provider-documentation",
+        "languagesMeaning": "Optimized language; additional synthesis languages are described by the model's languageSetId.",
+        "unknownFields": [
+          "presentation",
+          "age",
+          "tone",
+          "accent"
+        ]
+      },
+      "description": "OpenAI built-in voice.",
+      "recommendedByProvider": false,
+      "preview": {
+        "pageUrl": "https://developers.openai.com/api/docs/guides/text-to-speech#voice-options",
+        "audioUrl": null
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "openai-tts-guide"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openai:coral",
+      "provider": "openai",
+      "name": "Coral",
+      "nativeVoiceId": "coral",
+      "category": "built-in",
+      "availability": "listed",
+      "models": [
+        "openai:gpt-4o-mini-tts",
+        "openai:tts-1",
+        "openai:tts-1-hd"
+      ],
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "openai-tts-guide"
+        ],
+        "synthesisTested": false
+      },
+      "traits": {
+        "presentation": "unknown",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "traitsEvidence": {
+        "basis": "provider-documentation",
+        "languagesMeaning": "Optimized language; additional synthesis languages are described by the model's languageSetId.",
+        "unknownFields": [
+          "presentation",
+          "age",
+          "tone",
+          "accent"
+        ]
+      },
+      "description": "OpenAI built-in voice.",
+      "recommendedByProvider": false,
+      "preview": {
+        "pageUrl": "https://developers.openai.com/api/docs/guides/text-to-speech#voice-options",
+        "audioUrl": null
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "openai-tts-guide"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openai:echo",
+      "provider": "openai",
+      "name": "Echo",
+      "nativeVoiceId": "echo",
+      "category": "built-in",
+      "availability": "listed",
+      "models": [
+        "openai:gpt-4o-mini-tts",
+        "openai:tts-1",
+        "openai:tts-1-hd"
+      ],
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "openai-tts-guide"
+        ],
+        "synthesisTested": false
+      },
+      "traits": {
+        "presentation": "unknown",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "traitsEvidence": {
+        "basis": "provider-documentation",
+        "languagesMeaning": "Optimized language; additional synthesis languages are described by the model's languageSetId.",
+        "unknownFields": [
+          "presentation",
+          "age",
+          "tone",
+          "accent"
+        ]
+      },
+      "description": "OpenAI built-in voice.",
+      "recommendedByProvider": false,
+      "preview": {
+        "pageUrl": "https://developers.openai.com/api/docs/guides/text-to-speech#voice-options",
+        "audioUrl": null
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "openai-tts-guide"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openai:fable",
+      "provider": "openai",
+      "name": "Fable",
+      "nativeVoiceId": "fable",
+      "category": "built-in",
+      "availability": "listed",
+      "models": [
+        "openai:gpt-4o-mini-tts",
+        "openai:tts-1",
+        "openai:tts-1-hd"
+      ],
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "openai-tts-guide"
+        ],
+        "synthesisTested": false
+      },
+      "traits": {
+        "presentation": "unknown",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "traitsEvidence": {
+        "basis": "provider-documentation",
+        "languagesMeaning": "Optimized language; additional synthesis languages are described by the model's languageSetId.",
+        "unknownFields": [
+          "presentation",
+          "age",
+          "tone",
+          "accent"
+        ]
+      },
+      "description": "OpenAI built-in voice.",
+      "recommendedByProvider": false,
+      "preview": {
+        "pageUrl": "https://developers.openai.com/api/docs/guides/text-to-speech#voice-options",
+        "audioUrl": null
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "openai-tts-guide"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openai:nova",
+      "provider": "openai",
+      "name": "Nova",
+      "nativeVoiceId": "nova",
+      "category": "built-in",
+      "availability": "listed",
+      "models": [
+        "openai:gpt-4o-mini-tts",
+        "openai:tts-1",
+        "openai:tts-1-hd"
+      ],
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "openai-tts-guide"
+        ],
+        "synthesisTested": false
+      },
+      "traits": {
+        "presentation": "unknown",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "traitsEvidence": {
+        "basis": "provider-documentation",
+        "languagesMeaning": "Optimized language; additional synthesis languages are described by the model's languageSetId.",
+        "unknownFields": [
+          "presentation",
+          "age",
+          "tone",
+          "accent"
+        ]
+      },
+      "description": "OpenAI built-in voice.",
+      "recommendedByProvider": false,
+      "preview": {
+        "pageUrl": "https://developers.openai.com/api/docs/guides/text-to-speech#voice-options",
+        "audioUrl": null
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "openai-tts-guide"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openai:onyx",
+      "provider": "openai",
+      "name": "Onyx",
+      "nativeVoiceId": "onyx",
+      "category": "built-in",
+      "availability": "listed",
+      "models": [
+        "openai:gpt-4o-mini-tts",
+        "openai:tts-1",
+        "openai:tts-1-hd"
+      ],
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "openai-tts-guide"
+        ],
+        "synthesisTested": false
+      },
+      "traits": {
+        "presentation": "unknown",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "traitsEvidence": {
+        "basis": "provider-documentation",
+        "languagesMeaning": "Optimized language; additional synthesis languages are described by the model's languageSetId.",
+        "unknownFields": [
+          "presentation",
+          "age",
+          "tone",
+          "accent"
+        ]
+      },
+      "description": "OpenAI built-in voice.",
+      "recommendedByProvider": false,
+      "preview": {
+        "pageUrl": "https://developers.openai.com/api/docs/guides/text-to-speech#voice-options",
+        "audioUrl": null
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "openai-tts-guide"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openai:sage",
+      "provider": "openai",
+      "name": "Sage",
+      "nativeVoiceId": "sage",
+      "category": "built-in",
+      "availability": "listed",
+      "models": [
+        "openai:gpt-4o-mini-tts",
+        "openai:tts-1",
+        "openai:tts-1-hd"
+      ],
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "openai-tts-guide"
+        ],
+        "synthesisTested": false
+      },
+      "traits": {
+        "presentation": "unknown",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "traitsEvidence": {
+        "basis": "provider-documentation",
+        "languagesMeaning": "Optimized language; additional synthesis languages are described by the model's languageSetId.",
+        "unknownFields": [
+          "presentation",
+          "age",
+          "tone",
+          "accent"
+        ]
+      },
+      "description": "OpenAI built-in voice.",
+      "recommendedByProvider": false,
+      "preview": {
+        "pageUrl": "https://developers.openai.com/api/docs/guides/text-to-speech#voice-options",
+        "audioUrl": null
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "openai-tts-guide"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openai:shimmer",
+      "provider": "openai",
+      "name": "Shimmer",
+      "nativeVoiceId": "shimmer",
+      "category": "built-in",
+      "availability": "listed",
+      "models": [
+        "openai:gpt-4o-mini-tts",
+        "openai:tts-1",
+        "openai:tts-1-hd"
+      ],
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "openai-tts-guide"
+        ],
+        "synthesisTested": false
+      },
+      "traits": {
+        "presentation": "unknown",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "traitsEvidence": {
+        "basis": "provider-documentation",
+        "languagesMeaning": "Optimized language; additional synthesis languages are described by the model's languageSetId.",
+        "unknownFields": [
+          "presentation",
+          "age",
+          "tone",
+          "accent"
+        ]
+      },
+      "description": "OpenAI built-in voice.",
+      "recommendedByProvider": false,
+      "preview": {
+        "pageUrl": "https://developers.openai.com/api/docs/guides/text-to-speech#voice-options",
+        "audioUrl": null
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "openai-tts-guide"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openai:verse",
+      "provider": "openai",
+      "name": "Verse",
+      "nativeVoiceId": "verse",
+      "category": "built-in",
+      "availability": "listed",
+      "models": [
+        "openai:gpt-4o-mini-tts"
+      ],
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "openai-tts-guide"
+        ],
+        "synthesisTested": false
+      },
+      "traits": {
+        "presentation": "unknown",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "traitsEvidence": {
+        "basis": "provider-documentation",
+        "languagesMeaning": "Optimized language; additional synthesis languages are described by the model's languageSetId.",
+        "unknownFields": [
+          "presentation",
+          "age",
+          "tone",
+          "accent"
+        ]
+      },
+      "description": "OpenAI built-in voice.",
+      "recommendedByProvider": false,
+      "preview": {
+        "pageUrl": "https://developers.openai.com/api/docs/guides/text-to-speech#voice-options",
+        "audioUrl": null
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "openai-tts-guide"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openai:marin",
+      "provider": "openai",
+      "name": "Marin",
+      "nativeVoiceId": "marin",
+      "category": "built-in",
+      "availability": "listed",
+      "models": [
+        "openai:gpt-4o-mini-tts"
+      ],
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "openai-tts-guide"
+        ],
+        "synthesisTested": false
+      },
+      "traits": {
+        "presentation": "unknown",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "traitsEvidence": {
+        "basis": "provider-documentation",
+        "languagesMeaning": "Optimized language; additional synthesis languages are described by the model's languageSetId.",
+        "unknownFields": [
+          "presentation",
+          "age",
+          "tone",
+          "accent"
+        ]
+      },
+      "description": "OpenAI built-in voice.",
+      "recommendedByProvider": true,
+      "preview": {
+        "pageUrl": "https://developers.openai.com/api/docs/guides/text-to-speech#voice-options",
+        "audioUrl": null
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "openai-tts-guide"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "openai:cedar",
+      "provider": "openai",
+      "name": "Cedar",
+      "nativeVoiceId": "cedar",
+      "category": "built-in",
+      "availability": "listed",
+      "models": [
+        "openai:gpt-4o-mini-tts"
+      ],
+      "compatibility": {
+        "basis": "provider-documented",
+        "sourceIds": [
+          "openai-tts-guide"
+        ],
+        "synthesisTested": false
+      },
+      "traits": {
+        "presentation": "unknown",
+        "age": "unknown",
+        "tone": [],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "traitsEvidence": {
+        "basis": "provider-documentation",
+        "languagesMeaning": "Optimized language; additional synthesis languages are described by the model's languageSetId.",
+        "unknownFields": [
+          "presentation",
+          "age",
+          "tone",
+          "accent"
+        ]
+      },
+      "description": "OpenAI built-in voice.",
+      "recommendedByProvider": true,
+      "preview": {
+        "pageUrl": "https://developers.openai.com/api/docs/guides/text-to-speech#voice-options",
+        "audioUrl": null
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "openai-tts-guide"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "fish:b347db033a6549378b48d00acb0d06cd",
+      "provider": "fish",
+      "name": "Selene",
+      "nativeVoiceId": "b347db033a6549378b48d00acb0d06cd",
+      "category": "default",
+      "availability": "listed",
+      "models": [
+        "fish:s2.1-pro",
+        "fish:s2.1-pro-free",
+        "fish:s2-pro",
+        "fish:s1",
+        "openrouter:fish-audio/s2.1-pro-free:free"
+      ],
+      "compatibility": {
+        "basis": "inferred-from-provider-reference-id-interface",
+        "sourceIds": [
+          "fish-tts-api",
+          "fish-sdk",
+          "user-supplied-openrouter-catalogue"
+        ],
+        "synthesisTested": false,
+        "notes": "The API accepts a voice reference ID independently of the backend. No per-voice/backend compatibility matrix was published on the reviewed pages. The OpenRouter mapping for fish-audio/s2.1-pro-free:free was supplied by the user."
+      },
+      "traits": {
+        "presentation": "female",
+        "age": "middle aged",
+        "tone": [
+          "soft",
+          "calm",
+          "gentle",
+          "intimate",
+          "breathy"
+        ],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "useCases": [
+        "narration",
+        "ASMR"
+      ],
+      "traitsEvidence": {
+        "basis": "provider-profile-tags",
+        "sourceIds": [
+          "fish-selene"
+        ],
+        "languagesMeaning": "Profile language, not an exhaustive list of synthesis languages.",
+        "unknownFields": [
+          "accent"
+        ]
+      },
+      "description": "Female voice suited to meditation.",
+      "preview": {
+        "pageUrl": "https://fish.audio/app/m/b347db033a6549378b48d00acb0d06cd/",
+        "audioUrl": null,
+        "durationSeconds": 18
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "fish-defaults",
+          "fish-selene"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "fish:bf322df2096a46f18c579d0baa36f41d",
+      "provider": "fish",
+      "name": "Adrian",
+      "nativeVoiceId": "bf322df2096a46f18c579d0baa36f41d",
+      "category": "default",
+      "availability": "listed",
+      "models": [
+        "fish:s2.1-pro",
+        "fish:s2.1-pro-free",
+        "fish:s2-pro",
+        "fish:s1"
+      ],
+      "compatibility": {
+        "basis": "inferred-from-provider-reference-id-interface",
+        "sourceIds": [
+          "fish-tts-api",
+          "fish-sdk"
+        ],
+        "synthesisTested": false,
+        "notes": "The API accepts a voice reference ID independently of the backend. No per-voice/backend compatibility matrix was published on the reviewed pages."
+      },
+      "traits": {
+        "presentation": "male",
+        "age": "middle aged",
+        "tone": [
+          "deep",
+          "slow",
+          "measured",
+          "serious",
+          "dramatic"
+        ],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "useCases": [
+        "narration",
+        "storytelling"
+      ],
+      "traitsEvidence": {
+        "basis": "provider-profile-tags",
+        "sourceIds": [
+          "fish-adrian"
+        ],
+        "languagesMeaning": "Profile language, not an exhaustive list of synthesis languages.",
+        "unknownFields": [
+          "accent"
+        ]
+      },
+      "description": "Narrator with a dependable, steady delivery.",
+      "preview": {
+        "pageUrl": "https://fish.audio/app/m/bf322df2096a46f18c579d0baa36f41d/",
+        "audioUrl": null,
+        "durationSeconds": 17
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "fish-defaults",
+          "fish-adrian"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "fish:933563129e564b19a115bedd57b7406a",
+      "provider": "fish",
+      "name": "Sarah",
+      "nativeVoiceId": "933563129e564b19a115bedd57b7406a",
+      "category": "default",
+      "availability": "listed",
+      "models": [
+        "fish:s2.1-pro",
+        "fish:s2.1-pro-free",
+        "fish:s2-pro",
+        "fish:s1"
+      ],
+      "compatibility": {
+        "basis": "inferred-from-provider-reference-id-interface",
+        "sourceIds": [
+          "fish-tts-api",
+          "fish-sdk"
+        ],
+        "synthesisTested": false,
+        "notes": "The API accepts a voice reference ID independently of the backend. No per-voice/backend compatibility matrix was published on the reviewed pages."
+      },
+      "traits": {
+        "presentation": "female",
+        "age": "young",
+        "tone": [
+          "soft",
+          "breathy",
+          "intimate",
+          "gentle",
+          "sincere"
+        ],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "useCases": [
+        "conversational",
+        "narration"
+      ],
+      "traitsEvidence": {
+        "basis": "provider-profile-tags",
+        "sourceIds": [
+          "fish-sarah"
+        ],
+        "languagesMeaning": "Profile language, not an exhaustive list of synthesis languages.",
+        "unknownFields": [
+          "accent"
+        ]
+      },
+      "description": "Speaker with an engaged delivery.",
+      "preview": {
+        "pageUrl": "https://fish.audio/app/m/933563129e564b19a115bedd57b7406a/",
+        "audioUrl": null,
+        "durationSeconds": 15
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "fish-defaults",
+          "fish-sarah"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "fish:536d3a5e000945adb7038665781a4aca",
+      "provider": "fish",
+      "name": "Ethan",
+      "nativeVoiceId": "536d3a5e000945adb7038665781a4aca",
+      "category": "default",
+      "availability": "listed",
+      "models": [
+        "fish:s2.1-pro",
+        "fish:s2.1-pro-free",
+        "fish:s2-pro",
+        "fish:s1"
+      ],
+      "compatibility": {
+        "basis": "inferred-from-provider-reference-id-interface",
+        "sourceIds": [
+          "fish-tts-api",
+          "fish-sdk"
+        ],
+        "synthesisTested": false,
+        "notes": "The API accepts a voice reference ID independently of the backend. No per-voice/backend compatibility matrix was published on the reviewed pages."
+      },
+      "traits": {
+        "presentation": "male",
+        "age": "middle aged",
+        "tone": [
+          "professional",
+          "clear",
+          "calm",
+          "authoritative"
+        ],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "useCases": [
+        "educational",
+        "narration",
+        "documentary"
+      ],
+      "traitsEvidence": {
+        "basis": "provider-profile-tags",
+        "sourceIds": [
+          "fish-ethan"
+        ],
+        "languagesMeaning": "Profile language, not an exhaustive list of synthesis languages.",
+        "unknownFields": [
+          "accent"
+        ]
+      },
+      "description": "Explainer with a curious delivery.",
+      "preview": {
+        "pageUrl": "https://fish.audio/app/m/536d3a5e000945adb7038665781a4aca/",
+        "audioUrl": null,
+        "durationSeconds": 18
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "fish-defaults",
+          "fish-ethan"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "fish:e3cd384158934cc9a01029cd7d278634",
+      "provider": "fish",
+      "name": "Laura",
+      "nativeVoiceId": "e3cd384158934cc9a01029cd7d278634",
+      "category": "default",
+      "availability": "listed",
+      "models": [
+        "fish:s2.1-pro",
+        "fish:s2.1-pro-free",
+        "fish:s2-pro",
+        "fish:s1"
+      ],
+      "compatibility": {
+        "basis": "inferred-from-provider-reference-id-interface",
+        "sourceIds": [
+          "fish-tts-api",
+          "fish-sdk"
+        ],
+        "synthesisTested": false,
+        "notes": "The API accepts a voice reference ID independently of the backend. No per-voice/backend compatibility matrix was published on the reviewed pages."
+      },
+      "traits": {
+        "presentation": "female",
+        "age": "middle aged",
+        "tone": [
+          "deep",
+          "warm",
+          "calm",
+          "professional",
+          "clear"
+        ],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "useCases": [
+        "conversational",
+        "educational"
+      ],
+      "traitsEvidence": {
+        "basis": "provider-profile-tags",
+        "sourceIds": [
+          "fish-laura"
+        ],
+        "languagesMeaning": "Profile language, not an exhaustive list of synthesis languages.",
+        "unknownFields": [
+          "accent"
+        ]
+      },
+      "description": "Female narration with confidence.",
+      "preview": {
+        "pageUrl": "https://fish.audio/app/m/e3cd384158934cc9a01029cd7d278634/",
+        "audioUrl": null,
+        "durationSeconds": 17
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "fish-defaults",
+          "fish-laura"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "fish:79d0bd3e4e5444b18f7b6d89b5927bf1",
+      "provider": "fish",
+      "name": "Jordan",
+      "nativeVoiceId": "79d0bd3e4e5444b18f7b6d89b5927bf1",
+      "category": "default",
+      "availability": "listed",
+      "models": [
+        "fish:s2.1-pro",
+        "fish:s2.1-pro-free",
+        "fish:s2-pro",
+        "fish:s1"
+      ],
+      "compatibility": {
+        "basis": "inferred-from-provider-reference-id-interface",
+        "sourceIds": [
+          "fish-tts-api",
+          "fish-sdk"
+        ],
+        "synthesisTested": false,
+        "notes": "The API accepts a voice reference ID independently of the backend. No per-voice/backend compatibility matrix was published on the reviewed pages."
+      },
+      "traits": {
+        "presentation": "male",
+        "age": "old",
+        "tone": [
+          "professional",
+          "confident",
+          "measured",
+          "calm"
+        ],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "useCases": [
+        "educational",
+        "motivational"
+      ],
+      "traitsEvidence": {
+        "basis": "provider-profile-tags",
+        "sourceIds": [
+          "fish-jordan"
+        ],
+        "languagesMeaning": "Profile language, not an exhaustive list of synthesis languages.",
+        "unknownFields": [
+          "accent"
+        ]
+      },
+      "description": "Speaker suited to motivational material.",
+      "preview": {
+        "pageUrl": "https://fish.audio/app/m/79d0bd3e4e5444b18f7b6d89b5927bf1/",
+        "audioUrl": null,
+        "durationSeconds": 14
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "fish-defaults",
+          "fish-jordan"
+        ]
+      },
+      "annotations": {}
+    },
+    {
+      "id": "fish:9a9cf47702da476aa4629e2506d4a857",
+      "provider": "fish",
+      "name": "Hannah",
+      "nativeVoiceId": "9a9cf47702da476aa4629e2506d4a857",
+      "category": "default",
+      "availability": "listed",
+      "models": [
+        "fish:s2.1-pro",
+        "fish:s2.1-pro-free",
+        "fish:s2-pro",
+        "fish:s1"
+      ],
+      "compatibility": {
+        "basis": "inferred-from-provider-reference-id-interface",
+        "sourceIds": [
+          "fish-tts-api",
+          "fish-sdk"
+        ],
+        "synthesisTested": false,
+        "notes": "The API accepts a voice reference ID independently of the backend. No per-voice/backend compatibility matrix was published on the reviewed pages."
+      },
+      "traits": {
+        "presentation": "female",
+        "age": "middle aged",
+        "tone": [
+          "professional",
+          "confident",
+          "clear",
+          "friendly"
+        ],
+        "languages": [
+          "en"
+        ],
+        "accent": "unknown"
+      },
+      "useCases": [
+        "advertisement",
+        "educational",
+        "fitness"
+      ],
+      "traitsEvidence": {
+        "basis": "provider-profile-tags",
+        "sourceIds": [
+          "fish-hannah"
+        ],
+        "languagesMeaning": "Profile language, not an exhaustive list of synthesis languages.",
+        "unknownFields": [
+          "accent"
+        ]
+      },
+      "description": "Voice focused on conversational delivery.",
+      "preview": {
+        "pageUrl": "https://fish.audio/app/m/9a9cf47702da476aa4629e2506d4a857/",
+        "audioUrl": null,
+        "durationSeconds": 16
+      },
+      "provenance": {
+        "method": "bundled",
+        "refreshedAt": "2026-09-09T16:46:31Z",
+        "sourceIds": [
+          "fish-defaults",
+          "fish-hannah"
+        ]
+      },
+      "annotations": {}
+    }
+  ]
+}

@@ -3,15 +3,17 @@ import { jsonCall } from '../providers/llm/openai.js';
 import { config } from '../config.js';
 import { AnalysisSchema, type Analysis, type BookMetadata } from '../types.js';
 import type { WorkDir } from '../state.js';
+import { reportProgress } from '../util/progress.js';
 
 const SKIP_TITLE_RE =
   /\b(contents|table of contents|acknowledg|thanks|appendix|index|copyright|license|colophon|dedication|about the author|also by|praise for|title page|other books|project gutenberg)\b/i;
 
 /**
- * Stage 2: one whole-book LLM call — fiction detection, summary, character and
+ * Stage 2: one sampled overview LLM call — fiction detection, provisional summary, character and
  * author profiles, and a narrate/skip decision per chapter.
  */
 export async function runAnalyze(work: WorkDir): Promise<Analysis> {
+  reportProgress({ activity: 'Reading chapter outlines and sampling book text' });
   const meta = work.readJson<BookMetadata>('metadata.json');
 
   const chapterOutlines = meta.chapters
@@ -30,6 +32,7 @@ export async function runAnalyze(work: WorkDir): Promise<Analysis> {
     .map((ch) => `--- From chapter ${ch.index} ("${ch.title}") ---\n${fs.readFileSync(work.path(ch.file), 'utf8').slice(0, 4000)}`)
     .join('\n\n');
 
+  reportProgress({ activity: `Analyzing ${meta.chapters.length} chapter outlines and sampled text — waiting for model response` });
   const analysis = await jsonCall({
     model: config.analysisModel,
     schema: AnalysisSchema,
@@ -43,8 +46,9 @@ export async function runAnalyze(work: WorkDir): Promise<Analysis> {
 }
 Rules:
 - For non-fiction, "characters" should be an empty array.
-- List every named character that has spoken dialogue; set importance by how much they speak.
-- "country" is the country or accent the character would plausibly speak with.
+- The text is a sample, not the whole book. The summary and character list are provisional.
+- List only speaking characters supported by the supplied excerpts; do not invent a complete cast or rely on prior knowledge of the book.
+- Set character traits only when supported by the supplied text; otherwise use "unknown". Do not infer an accent from a name.
 - For the author, infer sex/age/country from the name and content; use "unknown" when unclear.
 - chapters: include EVERY chapter index given. narrate=false for: table of contents, appendix, index, acknowledgments/thanks, copyright, dedication, title pages, "also by" pages. narrate=true for: introduction, prologue, epilogue, and all body chapters.`,
     user: `Book: "${meta.title}" by ${meta.author} (language: ${meta.language})
@@ -56,6 +60,7 @@ Sample text:
 ${sampled}`,
   });
 
+  reportProgress({ activity: 'Checking chapter decisions and saving analysis', phase: 'saving' });
   // Backstop the LLM's chapter decisions with structural and keyword heuristics.
   const planByIndex = new Map(analysis.chapters.map((c) => [c.index, c]));
   analysis.chapters = meta.chapters.map((ch) => {
@@ -74,5 +79,6 @@ ${sampled}`,
   });
 
   work.writeJson('analysis.json', analysis);
+  reportProgress({ activity: 'Analysis saved', phase: 'completed' });
   return analysis;
 }

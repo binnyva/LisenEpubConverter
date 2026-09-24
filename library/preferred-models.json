@@ -1,0 +1,12 @@
+{
+  "models": [
+    { "provider": "openai", "model": "gpt-4.1", "starred": false },
+    { "provider": "openai", "model": "gpt-4.1-mini", "starred": false },
+    { "provider": "openrouter", "model": "openai/gpt-4.1", "starred": false },
+    { "provider": "openrouter", "model": "qwen/qwen3.7-flash", "starred": false },
+    { "provider": "openrouter", "model": "deepseek/deepseek-v4-flash-0731", "starred": true },
+    { "provider": "openrouter", "model": "mistralai/mistral-nemo", "starred": false },
+    { "provider": "openrouter", "model": "google/gemma-3-4b-it", "starred": false },
+    { "provider": "openrouter", "model": "openai/gpt-oss-20b", "starred": false }
+  ]
+}

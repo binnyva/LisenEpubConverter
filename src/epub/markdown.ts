@@ -1,5 +1,6 @@
 import TurndownService from 'turndown';
 import * as cheerio from 'cheerio';
+import { normalizeNonBreakingSpaces } from '../util/text.js';
 
 /**
  * Convert one XHTML chapter to audio-friendly Markdown:
@@ -43,10 +44,12 @@ export function htmlToMarkdown(html: string): string {
   });
 
   const body = $('body').html() ?? html;
-  return turndown
+  return normalizeNonBreakingSpaces(
+    turndown
     .turndown(body)
     .replace(/\n{3,}/g, '\n\n')
-    .trim();
+    .trim()
+  );
 }
 
 /**
@@ -54,7 +57,7 @@ export function htmlToMarkdown(html: string): string {
  * Used as a safety net right before synthesis.
  */
 export function markdownToSpeakable(md: string): string {
-  return md
+  return normalizeNonBreakingSpaces(md)
     .replace(/^#{1,6}\s+/gm, '')
     .replace(/^\s*[-*+]\s+/gm, '')
     .replace(/^\s*(\d+)\.\s+/gm, '$1. ')

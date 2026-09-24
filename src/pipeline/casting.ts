@@ -1,20 +1,18 @@
 import fs from 'node:fs';
 import { jsonCall } from '../providers/llm/openai.js';
-import { getTTSProvider } from '../providers/tts/openai.js';
 import { config } from '../config.js';
 import { CastingSchema, type Analysis, type Casting, type ChapterScript } from '../types.js';
 import type { WorkDir } from '../state.js';
+import { readCharacterRegistry } from './list-characters.js';
+import { reportProgress } from '../util/progress.js';
 
 /**
- * Stage 5: assign a voice to the narrator and every speaking character.
- * The most talkative characters get distinct voices; the rest reuse voices,
- * differentiated by delivery instructions. Output (casting.json) is meant to
- * be hand-editable before synthesis.
+ * Stage 6: describe intended character voices without selecting a provider or model.
  */
 export async function runCasting(work: WorkDir): Promise<Casting> {
+  reportProgress({ activity: 'Reading character profiles and counting scripted speakers' });
   const analysis = work.readJson<Analysis>('analysis.json');
-  const provider = getTTSProvider();
-  const voices = provider.listVoices();
+  const registry = readCharacterRegistry(work);
 
   // Count spoken segments per character across all chapter scripts.
   const counts = new Map<string, number>();
@@ -29,22 +27,28 @@ export async function runCasting(work: WorkDir): Promise<Casting> {
   const ranked = [...counts.entries()].sort((a, b) => b[1] - a[1]);
 
   if (ranked.length === 0) {
-    // Non-fiction or no dialogue: narrator only, matched to the author.
-    const narratorVoice =
-      voices.find((v) => v.sex === (analysis.author.sex === 'female' ? 'female' : 'male')) ??
-      voices[0];
     const casting: Casting = {
-      narrator: { voiceId: narratorVoice.id, instructions: 'Measured, engaging audiobook narrator.' },
+      version: 2,
+      narrator: {
+        voiceProfile: {
+          presentation: analysis.author.sex === 'unknown' ? 'unknown' : analysis.author.sex,
+          age: analysis.author.age,
+          tone: ['measured', 'engaging'],
+          language: 'unknown',
+          accent: analysis.author.country,
+        },
+        instructions: 'Measured, engaging audiobook narrator.',
+      },
       characters: {},
     };
     work.writeJson('casting.json', casting);
+    reportProgress({ activity: 'Narrator profile saved; no character voices needed', phase: 'completed' });
     return casting;
   }
 
-  const voiceCatalog = voices.map((v) => `- ${v.id}: ${v.sex}, ${v.description}`).join('\n');
   const castDetails = ranked
     .map(([name, count]) => {
-      const c = analysis.characters.find((ch) => ch.name === name);
+      const c = registry.characters.find((ch) => ch.name === name);
       const traits = c
         ? `${c.sex}, age ${c.age}, ${c.race}, ${c.class}, ${c.country}`
         : 'unknown traits';
@@ -52,46 +56,47 @@ export async function runCasting(work: WorkDir): Promise<Casting> {
     })
     .join('\n');
 
+  reportProgress({ activity: `Designing narrator and ${ranked.length} character voice profiles — waiting for model response` });
   const casting = await jsonCall({
     model: config.analysisModel,
     schema: CastingSchema,
     system: `You cast voices for a multi-voice audiobook. Respond with JSON:
-{"narrator": {"voiceId", "instructions"}, "characters": {"<name>": {"voiceId", "instructions"}, ...}}
+{"version":2,"narrator":{"voiceProfile":{"presentation","age","tone","language","accent"},"instructions"},"characters":{"<name>":{"voiceProfile":{"presentation","age","tone","language","accent"},"instructions"}, ...}}
 
 Rules:
-- Use ONLY voiceIds from the voice catalog.
-- Assign the narrator a voice suited to the book's tone and the author's profile; its instructions describe a steady audiobook narration style.
-- The top ${config.distinctVoiceSlots} characters by spoken segments each get a DIFFERENT voice (also different from the narrator's), matched to their sex and age.
-- Remaining characters REUSE voices (never the narrator's); differentiate them with "instructions" describing age, accent, class and personality, e.g. "Elderly Scottish fisherman, gruff and slow."
+- Do not select a provider, model, or voice ID. Describe the desired sound only.
+- Give every speaker presentation, approximate age, a short tone list, language, accent, and standing delivery instructions.
+- Use "unknown" or "unspecified" where evidence is absent.
+- The narrator's instructions describe steady audiobook narration. Character instructions differentiate age, accent, class, and personality.
 - Every character listed must appear in "characters". Write instructions for every speaker.`,
     user: `Book summary: ${analysis.summary.slice(0, 600)}
 
 Author: ${analysis.author.name} (${analysis.author.sex}, ${analysis.author.country})
 
-Voice catalog:
-${voiceCatalog}
-
 Characters:
 ${castDetails}`,
   });
 
-  // Validate voice ids; fall back deterministically on anything invalid.
-  const validIds = new Set(voices.map((v) => v.id));
-  if (!validIds.has(casting.narrator.voiceId)) casting.narrator.voiceId = voices[0].id;
+  reportProgress({ activity: 'Checking and saving voice profiles', phase: 'saving' });
+  casting.version = 2;
   for (const [name] of ranked) {
     const assignment = casting.characters[name];
-    if (!assignment || !validIds.has(assignment.voiceId)) {
-      const c = analysis.characters.find((ch) => ch.name === name);
-      const pool = voices.filter(
-        (v) => v.id !== casting.narrator.voiceId && (c?.sex === 'unknown' || v.sex === c?.sex || v.sex === 'neutral')
-      );
+    if (!assignment) {
+      const c = registry.characters.find((ch) => ch.name === name);
       casting.characters[name] = {
-        voiceId: (pool[0] ?? voices[0]).id,
-        instructions: assignment?.instructions ?? '',
+        voiceProfile: {
+          presentation: c?.sex ?? 'unknown',
+          age: c?.age ?? 'unknown',
+          tone: [],
+          language: 'unknown',
+          accent: c?.country ?? 'unspecified',
+        },
+        instructions: '',
       };
     }
   }
 
   work.writeJson('casting.json', casting);
+  reportProgress({ activity: 'Voice profiles saved', phase: 'completed' });
   return casting;
 }
