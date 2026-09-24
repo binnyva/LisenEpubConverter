@@ -9,6 +9,7 @@ import { mergeChapterObservations } from '../src/pipeline/chapters.js';
 import { clearArtifactsFrom, recoverStageStateFromArtifacts, runStage } from '../src/pipeline/runner.js';
 import { runScript } from '../src/pipeline/script.js';
 import { runCasting } from '../src/pipeline/casting.js';
+import { reconcileUnresolvedSpeakers } from '../src/pipeline/reconcile-speakers.js';
 import { jsonCall } from '../src/providers/llm/openai.js';
 
 vi.mock('../src/providers/llm/openai.js', () => ({ jsonCall: vi.fn() }));
@@ -262,6 +263,47 @@ describe('registry consumers', () => {
     await expect(runScript(work)).rejects.toThrow('New or unresolved speakers');
     expect(work.readJson<any>('character-candidates/00.json').candidates[0]).toMatchObject({ speaker: 'Bob', text: 'Hello.' });
     expect(fs.existsSync(work.path('script/00.json'))).toBe(false);
+  });
+
+  it('asks the LLM for conservative, reviewable unresolved-speaker proposals', async () => {
+    const { work } = fixture(1);
+    work.writeJson(characterChapterFile(0), chapter(0, [observation('Alice')]));
+    runListCharacters(work);
+    work.writeJson('chapter-summaries.json', { 0: 'Alice meets a stranger in a denim jacket.' });
+    work.writeJson('character-candidates/00.json', { index: 0, candidates: [
+      { speaker: 'fellow in denim', text: '"Good evening," he said.', confidence: 'low' },
+      { speaker: 'girl in denim couple', text: '"Come on," she said.', confidence: 'low' },
+    ] });
+    llm.mockResolvedValueOnce({ resolutions: [
+      { speaker: 'fellow in denim', resolution: 'existing', character: 'Alice', reason: 'The dialogue tag identifies Alice.', evidence: 'Alice said it.' },
+      { speaker: 'girl in denim couple', resolution: 'new', reason: 'A separate named role speaks.', evidence: 'the girl said' },
+    ] });
+
+    const proposals = await reconcileUnresolvedSpeakers(work);
+
+    expect(proposals).toEqual(expect.arrayContaining([
+      expect.objectContaining({ speaker: 'fellow in denim', resolution: 'existing', characterId: expect.any(String) }),
+      expect.objectContaining({ speaker: 'girl in denim couple', resolution: 'new' }),
+    ]));
+    expect(llm.mock.calls[0][0].system).toContain('Never guess merely from gender, clothing, or voice');
+    expect(llm.mock.calls[0][0].user).toContain('Alice meets a stranger');
+  });
+
+  it('rejects an LLM existing-character answer that is not in the registry', async () => {
+    const { work } = fixture(1);
+    work.writeJson(characterChapterFile(0), chapter(0, [observation('Alice')]));
+    runListCharacters(work);
+    work.writeJson('chapter-summaries.json', { 0: 'A stranger speaks.' });
+    work.writeJson('character-candidates/00.json', { index: 0, candidates: [
+      { speaker: 'stranger', text: '"Hello."', confidence: 'low' },
+    ] });
+    llm.mockResolvedValueOnce({ resolutions: [
+      { speaker: 'stranger', resolution: 'existing', character: 'Invented Person', reason: 'Guess.', evidence: 'None.' },
+    ] });
+
+    await expect(reconcileUnresolvedSpeakers(work)).resolves.toEqual([
+      expect.objectContaining({ speaker: 'stranger', resolution: 'unresolved', reason: expect.stringContaining('outside the current registry') }),
+    ]);
   });
 
   it('casts using registry traits rather than provisional analysis candidates', async () => {

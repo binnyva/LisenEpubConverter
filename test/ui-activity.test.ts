@@ -7,10 +7,17 @@ import { STAGES } from '../src/config.js';
 function browser() {
   const nodes = new Map<string, any>();
   const element = () => ({
-    textContent: '', className: '', hidden: true, children: [] as any[],
+    textContent: '', className: '', hidden: true, children: [] as any[], dataset: {} as Record<string, string>,
     scrollHeight: 0, scrollTop: 0, clientHeight: 0,
     append(child: any) { this.children.push(child); },
     replaceChildren() { this.children = []; },
+    querySelector(selector: string) {
+      return selector === '[data-reconcile-speakers]'
+        ? this.children.find((child: any) => child.dataset?.reconcileSpeakers !== undefined)
+        : undefined;
+    },
+    attributes: {} as Record<string, string>,
+    setAttribute(name: string, value: string) { this.attributes[name] = value; },
     removeAttribute(name: string) { delete (this as any)[name]; },
   });
   const document = {
@@ -118,13 +125,42 @@ describe('UI stage activity', () => {
     expect(markup).toContain('young girl');
   });
 
+  it('can hide non-blocking character review cards', () => {
+    const { nodes, context } = browser();
+    context.reviewRows = [{ hidden: false, classList: { contains: () => false } }, { hidden: false, classList: { contains: () => true } }];
+    vm.runInContext("document.querySelectorAll=selector=>selector==='[data-character-editor]'?reviewRows:[];showBlockingCharacterIssues=true;updateCharacterReviewFilter()", context);
+    expect(context.reviewRows.map((row: any) => row.hidden)).toEqual([true, false]);
+    expect(nodes.get('#show-blocking-character-issues')).toMatchObject({ textContent: 'Show all character issues' });
+    expect(nodes.get('#show-blocking-character-issues').attributes['aria-pressed']).toBe('true');
+  });
+
   it('offers an unresolved speaker a match-or-add resolution in the character dialog', () => {
     const { context } = browser();
-    vm.runInContext("candidateResolutions={};book={characterCandidates:[],characterRegistry:{characters:[{id:'alice',name:'Alice'}]}}", context);
+    vm.runInContext("candidateResolutions={};book={chapters:[{index:12,title:'Sacks'}],characterCandidates:[],characterRegistry:{characters:[{id:'alice',name:'Alice',chapters:[12]}]}}", context);
     const markup = vm.runInContext("candidateMarkup({key:'candidate-poem-fury',speaker:'Poem Fury',chapters:[4],samples:[]},book.characterRegistry)", context);
     expect(markup).toContain('Unresolved speaker: Poem Fury');
     expect(markup).toContain('Add Poem Fury as a new character');
-    expect(markup).toContain('Use existing character: Alice');
+    expect(markup).toContain("C 13: Alice (from Chapter &#39;Sacks&#39;)");
+  });
+
+  it('preselects supported LLM speaker proposals but leaves unsupported ones unresolved', () => {
+    const { context } = browser();
+    vm.runInContext("book={characterCandidates:[],characterRegistry:{characters:[{id:'alice',name:'Alice'}]}}", context);
+    vm.runInContext("applySpeakerSuggestions([{key:'candidate-fellow',resolution:'existing',characterId:'alice',reason:'Explicit dialogue tag.',evidence:'Alice said.'},{key:'candidate-girl',resolution:'new',reason:'A distinct role speaks.',evidence:'the girl said'},{key:'candidate-unknown',resolution:'unresolved',reason:'No support.',evidence:''}])", context);
+    expect(vm.runInContext('candidateResolutions["candidate-fellow"]', context)).toBe('alice');
+    expect(vm.runInContext('candidateResolutions["candidate-girl"]', context)).toBe('new');
+    expect(vm.runInContext('candidateResolutions["candidate-unknown"]', context)).toBeUndefined();
+    expect(vm.runInContext('candidateSuggestions["candidate-fellow"].reason', context)).toBe('Explicit dialogue tag.');
+  });
+
+  it('offers LLM reconciliation directly beside an unresolved Script failure', () => {
+    const { nodes, context } = browser();
+    context.current = { id: 'speaker-failure', epubPath: '/book.epub', stage: 'script', status: 'failed', events: [],
+      error: 'New or unresolved speakers in chapter 15: fellow in denim.' };
+    vm.runInContext('renderJob(current)', context);
+    expect(nodes.get('#activity-log').children.at(-1)).toMatchObject({
+      textContent: 'Ask LLM to propose speaker resolutions', className: 'quiet',
+    });
   });
 
   it('resumes Script at the first chapter with an unresolved speaker', () => {

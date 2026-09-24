@@ -92,7 +92,7 @@ All stages report activity in the CLI and the UI’s Stage activity panel. Analy
 
 Long-running activities print elapsed-time updates every 10 seconds; the UI updates elapsed time while polling and uses an indeterminate bar when there is no measurable percentage. Percentages describe the current activity’s units, not time remaining or full-stage completion (for example, encoding can reach 100% before M4B export). UI progress tracks jobs started in that UI server; separate CLI runs are not attached to it.
 
-List Characters requires all narratable chapters and does not accept `--chapters`. For an older work folder, run `chapters` without `--rerun` to backfill missing character observations while retaining cleaned text and summaries (billable LLM discovery for fiction), then run `list-characters`. Script regenerates chapter scripts when their registry hash changes. A changed registry also clears derived audio manifests and encoded M4As so assembly cannot reuse old speaker assignments; paid MP3 caches and exported books remain. If Script reports new speakers, review `character-candidates/`, add supported identities or aliases to the corresponding `chapter-characters/` file, and rerun `list-characters --rerun`, then Script.
+List Characters requires all narratable chapters and does not accept `--chapters`. For an older work folder, run `chapters` without `--rerun` to backfill missing character observations while retaining cleaned text and summaries (billable LLM discovery for fiction), then run `list-characters`. Script regenerates chapter scripts when their registry hash changes. A changed registry also clears derived audio manifests and encoded M4As so assembly cannot reuse old speaker assignments; paid MP3 caches and exported books remain. If Script reports new speakers, the workspace failure panel offers **Ask LLM to propose speaker resolutions**. It preselects only evidence-backed matches or new roles in Character Review; inspect the proposal and save the registry to resume Script at the failed chapter. The manual fallback is to review `character-candidates/`, add supported identities or aliases to the corresponding `chapter-characters/` file, and rerun `list-characters --rerun`, then Script.
 
 Without extra flags, completed stages and existing chapter output are reused. `--rerun` invalidates completion from that stage onward and clears the stage output needed to execute it again; downstream artifacts remain. `--rebuild` clears that stage's derived artifacts as well, but runs only the requested stage. It cannot be combined with `--chapters` or `--rerun`. Both preserve `audio-cache/`. Use a rebuild when upstream edits require regenerating downstream artifacts.
 
@@ -130,6 +130,9 @@ Environment variables (see `src/config.ts` for defaults):
 - `LISEN_TTS_MODEL` — default TTS target (`gpt-4o-mini-tts` for OpenAI; `openai/gpt-4o-mini-tts-2025-12-15` for OpenRouter)
 - `LISEN_LLM_PROVIDER` — text-processing provider: `openai` or `openrouter` (default `openai`)
 - `LISEN_LLM_RESPONSE_TIMEOUT_MS` — maximum wait for each text-model response before retrying (default `120000`)
+- `LISEN_LLM_MAX_RETRIES` — total attempts for a transient text-model failure, including the initial request (default `5`)
+- `LISEN_LLM_RETRY_BASE_MS` — initial LLM retry delay; each retry doubles it (default `2000`)
+- `LISEN_LLM_RETRY_MAX_MS` — maximum exponential LLM retry delay when OpenRouter supplies no `Retry-After` value (default `60000`)
 - `LISEN_LLM_MAX_COMPLETION_TOKENS` — maximum tokens requested for each structured text-model response (default `4096`)
 - `LISEN_PREFERRED_MODELS_FILE` — editable UI model list (default `./library/preferred-models.json`)
 - `LISEN_TTS_PROVIDER` — TTS provider: `openai` or `openrouter` (default `openai`)

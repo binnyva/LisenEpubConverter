@@ -151,6 +151,18 @@ export const config = {
   get llmResponseTimeoutMs(): number {
     return positiveIntFromEnv('LISEN_LLM_RESPONSE_TIMEOUT_MS', 120_000);
   },
+  /** Total LLM attempts for a transient failure, including the initial request. */
+  get llmMaxRetries(): number {
+    return positiveIntFromEnv('LISEN_LLM_MAX_RETRIES', 5);
+  },
+  /** Initial retry delay for LLM calls. Subsequent delays double from this value. */
+  get llmRetryBaseMs(): number {
+    return positiveIntFromEnv('LISEN_LLM_RETRY_BASE_MS', 2_000);
+  },
+  /** Upper bound for an exponential LLM retry delay when no provider delay is supplied. */
+  get llmRetryMaxMs(): number {
+    return positiveIntFromEnv('LISEN_LLM_RETRY_MAX_MS', 60_000);
+  },
   /** Status heartbeat while a pipeline activity is pending. */
   progressIntervalMs: 10_000,
   /** Max characters per TTS request (OpenAI speech limit is 4096). */

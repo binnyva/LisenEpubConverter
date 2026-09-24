@@ -17,6 +17,22 @@ function getClient(): OpenAI {
 type Message = { role: 'system' | 'user'; content: string };
 type Completion = { content: string; diagnostics?: string };
 
+/** A transport error with an optional provider-directed minimum retry delay. */
+class RetryableLLMError extends Error {
+  constructor(message: string, readonly retryAfterMs?: number) {
+    super(message);
+    this.name = 'RetryableLLMError';
+  }
+}
+
+/** A request rejected by the provider; retrying the identical request will not help. */
+class NonRetryableLLMError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'NonRetryableLLMError';
+  }
+}
+
 type OpenRouterResponse = {
   id?: unknown;
   model?: unknown;
@@ -66,6 +82,35 @@ function openRouterErrorMessage(body: unknown): string {
   const message = typeof error?.message === 'string' ? error.message.slice(0, 1000) : 'no provider error message';
   const upstream = typeof error?.metadata?.raw === 'string' ? error.metadata.raw.slice(0, 1000) : undefined;
   return upstream && upstream !== message ? `${message} (${upstream})` : message;
+}
+
+/** Parse the standard Retry-After header's delta-seconds or HTTP-date form. */
+function retryAfterMs(response: Response): number | undefined {
+  const value = response.headers.get('retry-after')?.trim();
+  if (!value) return undefined;
+
+  const seconds = Number(value);
+  if (Number.isFinite(seconds) && seconds >= 0) return Math.ceil(seconds * 1000);
+
+  const date = Date.parse(value);
+  if (!Number.isNaN(date)) return Math.max(0, date - Date.now());
+  return undefined;
+}
+
+function retryDelayMs(error: unknown, attempt: number): number {
+  const providerDelay = error instanceof RetryableLLMError ? error.retryAfterMs : undefined;
+  // OpenRouter documents Retry-After as the delay to honor. Its absence is
+  // expected for some upstream-capacity errors, so fall back to a bounded
+  // exponential schedule only when the server cannot give a precise delay.
+  if (providerDelay !== undefined) return providerDelay;
+  return Math.min(config.llmRetryBaseMs * 2 ** (attempt - 1), config.llmRetryMaxMs);
+}
+
+function retryDelayDescription(error: unknown): string {
+  if (!(error instanceof RetryableLLMError)) return '';
+  return error.retryAfterMs === undefined
+    ? ' (OpenRouter supplied no Retry-After; using exponential fallback)'
+    : ' (honoring OpenRouter Retry-After)';
 }
 
 function openRouterResponseFormat(schema: z.ZodType): {
@@ -126,9 +171,12 @@ async function createCompletion(model: string, messages: Message[], schema: z.Zo
       // `max_completion_tokens` name can exclude otherwise compatible routes.
       max_tokens: config.llmMaxCompletionTokens,
       // Chapter cleanup and the other Lisen stages need schema-shaped output,
-      // not a reasoning transcript. Disable thinking by default so it cannot
-      // consume the completion budget before the JSON is written.
-      reasoning: { effort: config.openRouterReasoningEffort },
+      // not a reasoning transcript. Omitting this when disabled is important:
+      // require_parameters would otherwise exclude endpoints that do not
+      // expose OpenRouter's optional reasoning parameter.
+      ...(config.openRouterReasoningEffort === 'none'
+        ? {}
+        : { reasoning: { effort: config.openRouterReasoningEffort } }),
       // Do not let OpenRouter route to a provider that would silently ignore
       // JSON mode; every pipeline stage relies on schema-valid JSON.
       provider: {
@@ -168,6 +216,7 @@ async function createCompletion(model: string, messages: Message[], schema: z.Zo
       headers: {
         requestId: res.headers.get('x-request-id') ?? res.headers.get('x-openrouter-request-id') ?? undefined,
         contentType: res.headers.get('content-type') ?? undefined,
+        retryAfter: res.headers.get('retry-after') ?? undefined,
       },
       body: responseText,
     });
@@ -180,7 +229,11 @@ async function createCompletion(model: string, messages: Message[], schema: z.Zo
     }
     const diagnostics = openRouterDiagnostics(body, res);
     if (!res.ok) {
-      throw new Error(`OpenRouter LLM request failed (${res.status}): ${openRouterErrorMessage(body)}. Diagnostics: ${diagnostics}`);
+      const message = `OpenRouter LLM request failed (${res.status}): ${openRouterErrorMessage(body)}. Diagnostics: ${diagnostics}`;
+      if (res.status === 429 || res.status === 408 || res.status >= 500) {
+        throw new RetryableLLMError(message, retryAfterMs(res));
+      }
+      throw new NonRetryableLLMError(message);
     }
     const content = (body as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]?.message
       ?.content;
@@ -209,7 +262,7 @@ export async function jsonCall<S extends z.ZodType>(opts: {
   schema: S;
   maxRetries?: number;
 }): Promise<z.infer<S>> {
-  const maxRetries = opts.maxRetries ?? 3;
+  const maxRetries = opts.maxRetries ?? config.llmMaxRetries;
   let lastError = '';
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -231,9 +284,10 @@ export async function jsonCall<S extends z.ZodType>(opts: {
       diagnostics = completion.diagnostics;
     } catch (err) {
       if (err instanceof TaskCancelledError) throw err;
+      if (err instanceof NonRetryableLLMError) throw err;
       if (attempt === maxRetries) throw err;
-      const backoff = 2000 * 2 ** (attempt - 1);
-      reportWarning(`LLM call failed (${(err as Error).message}), retrying in ${backoff / 1000}s...`);
+      const backoff = retryDelayMs(err, attempt);
+      reportWarning(`LLM call failed (${(err as Error).message}), retrying in ${backoff / 1000}s${retryDelayDescription(err)}...`);
       await waitForRetry(backoff);
       continue;
     }

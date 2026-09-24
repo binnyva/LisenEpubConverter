@@ -1,0 +1,9 @@
+{
+  "models": [
+    { "provider": "openai", "model": "gpt-4o-mini-tts", "starred": true },
+    { "provider": "openai", "model": "tts-1", "starred": false },
+    { "provider": "openai", "model": "tts-1-hd", "starred": false },
+    { "provider": "openrouter", "model": "fish-audio/s2.1-pro-free:free", "starred": false },
+    { "provider": "openrouter", "model": "hexgrad/kokoro-82m", "starred": true }
+  ]
+}

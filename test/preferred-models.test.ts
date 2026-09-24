@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { config, withLlmRunConfig } from '../src/config.js';
-import { loadPreferredModels } from '../src/ui/models.js';
+import { loadPreferredAudioModels, loadPreferredModels } from '../src/ui/models.js';
 
 const temporaryDirectories: string[] = [];
 
@@ -35,6 +35,18 @@ describe('preferred UI models', () => {
   it('reports an invalid file instead of silently using malformed model settings', () => {
     const file = modelsFile(JSON.stringify({ models: [{ provider: 'other', model: '', starred: 'yes' }] }));
     expect(() => loadPreferredModels(file)).toThrow('Invalid preferred models file');
+  });
+
+  it('reads audio bookmarks separately from text models', () => {
+    const file = modelsFile(JSON.stringify({ models: [
+      { provider: 'openai', model: 'gpt-4o-mini-tts', starred: true },
+      { provider: 'openrouter', model: 'hexgrad/kokoro-82m', starred: false },
+    ] }));
+
+    expect(loadPreferredAudioModels(file)).toEqual([
+      { provider: 'openai', model: 'gpt-4o-mini-tts', starred: true },
+      { provider: 'openrouter', model: 'hexgrad/kokoro-82m', starred: false },
+    ]);
   });
 
   it('keeps a UI model choice scoped to its asynchronous pipeline run', async () => {

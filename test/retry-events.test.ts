@@ -63,7 +63,7 @@ describe('script rebuild retry events', () => {
     await vi.runAllTimersAsync();
     await outcome;
     expect(onEvent.mock.calls.map(([event]) => event.type).filter((type) => type !== 'progress')).toEqual(exhausted
-      ? ['started', 'warning', 'warning'] : ['started', 'warning', 'completed']);
-    expect(fetchMock).toHaveBeenCalledTimes(exhausted ? 3 : 2);
+      ? ['started', 'warning', 'warning', 'warning', 'warning'] : ['started', 'warning', 'completed']);
+    expect(fetchMock).toHaveBeenCalledTimes(exhausted ? 5 : 2);
   });
 });
