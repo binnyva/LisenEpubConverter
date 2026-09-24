@@ -96,6 +96,35 @@ describe('voice library bindings', () => {
     expect(validateVoiceBindings(work).characters.Alice.selection).toBe('manual');
   });
 
+  it('uses the EPUB language when automatic cast profiles leave language unknown', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lisen-language-voices-'));
+    roots.push(root);
+    const epub = path.join(root, 'book.epub');
+    const library = path.join(root, 'voices.json');
+    fs.writeFileSync(epub, crypto.randomBytes(32));
+    fs.writeFileSync(library, JSON.stringify({
+      version: 1,
+      updatedAt: new Date().toISOString(),
+      models: [{ id: 'openrouter:test-tts', provider: 'openrouter', model: 'test-tts', maxChars: 4000 }],
+      voices: [
+        { id: 'openrouter:test-tts:a-mandarin', nativeVoiceId: 'a-mandarin', models: ['openrouter:test-tts'], traits: { presentation: 'female', languages: ['zh'], accent: 'Mandarin Chinese' } },
+        { id: 'openrouter:test-tts:z-english', nativeVoiceId: 'z-english', models: ['openrouter:test-tts'], traits: { presentation: 'female', languages: ['en'], accent: 'American English' } },
+      ],
+    }));
+    const work = new WorkDir(epub, root);
+    work.writeJson('metadata.json', { title: 'Book', author: 'Author', language: 'en-US', chapters: [] });
+    work.writeJson('casting.json', {
+      version: 2,
+      narrator: { voiceProfile: { presentation: 'female', language: 'unknown' }, instructions: '' },
+      characters: { Alice: { voiceProfile: { presentation: 'female', language: 'unknown' }, instructions: '' } },
+    });
+
+    const bindings = runVoices(work, { provider: 'openrouter', model: 'test-tts' }, library);
+    expect(bindings.narrator.voiceId).toBe('z-english');
+    expect(bindings.characters.Alice.voiceId).toBe('z-english');
+    expect(bindings.characters.Alice.match.reasons).toContain('Matches en language.');
+  });
+
   it('migrates a legacy model-specific cast before applying library voices', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lisen-legacy-voices-'));
     roots.push(root);

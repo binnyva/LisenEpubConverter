@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import { z } from 'zod';
 import { jsonCall } from '../providers/llm/openai.js';
 import { config } from '../config.js';
+import { markdownToSpeakable } from '../epub/markdown.js';
 import { hasNarratableText, normalizeNonBreakingSpaces, splitIntoBlocks } from '../util/text.js';
 import type { WorkDir } from '../state.js';
 import { characterRegistryHash, readCharacterRegistry } from './list-characters.js';
@@ -29,6 +30,49 @@ export function filterNarratableSegments(segments: ScriptSegment[]): ScriptSegme
       return text === segment.text ? segment : { ...segment, text };
     })
     .filter((segment) => hasNarratableText(segment.text));
+}
+
+/**
+ * Pull an opening ATX heading out of a cleaned chapter. The heading is handled
+ * separately so an attribution model cannot omit it or give it to a character.
+ */
+export function splitLeadingChapterTitle(markdown: string): { title?: string; content: string } {
+  const match = markdown.match(/^(?:\uFEFF)?(?:[ \t]*\r?\n)*[ \t]*#{1,6}[ \t]+(.+?)[ \t]*(?:\r?\n|$)/);
+  if (!match) return { content: markdown };
+
+  // ATX headings can have optional closing hashes; markdownToSpeakable also
+  // removes emphasis such as the **VIEWFINDER** heading in many EPUBs.
+  const title = markdownToSpeakable(match[1].replace(/[ \t]+#+[ \t]*$/, ''));
+  const content = markdown.slice(match[0].length).replace(/^(?:[ \t]*\r?\n)+/, '');
+  return hasNarratableText(title)
+    ? { title, content }
+    : { content: markdown };
+}
+
+/** Add the heading as a dedicated narrator cue, bounded by natural TTS pauses. */
+export function withChapterTitle(segments: ScriptSegment[], title?: string): ScriptSegment[] {
+  const narratable = filterNarratableSegments(segments);
+  if (!title) return narratable;
+
+  const chapterTitle: ScriptSegment = {
+    speaker: 'narrator',
+    // Ellipses make the pause part of the spoken request, including at the
+    // start/end of a chapter where there is no adjacent segment to imply one.
+    text: `… ${title} …`,
+    delivery: 'Announce the chapter title clearly, with a brief pause before and after.',
+    confidence: 'high',
+  };
+  const comparable = (text: string) => markdownToSpeakable(text)
+    .normalize('NFKC')
+    .replace(/^\W+|\W+$/gu, '')
+    .replace(/\s+/g, ' ')
+    .toLocaleLowerCase();
+
+  // Older scripts may already contain the heading because an LLM chose to
+  // emit it. Upgrade that segment rather than speaking the title twice.
+  return comparable(narratable[0]?.text ?? '') === comparable(title)
+    ? [chapterTitle, ...narratable.slice(1)]
+    : [chapterTitle, ...narratable];
 }
 
 /**
@@ -72,7 +116,12 @@ export async function runScript(
         // before the layout-only segment guard was added.
         const existing = work.readJson<ChapterScript>(scriptFile);
         if (existing.characterRegistryHash === registryHash) {
-          const segments = filterNarratableSegments(existing.segments);
+          const text = fs.readFileSync(
+            work.path(`chapters-clean/${String(ch.index).padStart(2, '0')}.md`),
+            'utf8'
+          );
+          const { title } = splitLeadingChapterTitle(text);
+          const segments = withChapterTitle(existing.segments, title);
           if (segments.length !== existing.segments.length || segments.some((segment, i) => segment !== existing.segments[i])) {
             work.writeJson(scriptFile, { ...existing, segments });
           }
@@ -81,10 +130,11 @@ export async function runScript(
         }
       }
 
-      const text = fs.readFileSync(
+      const cleanedText = fs.readFileSync(
         work.path(`chapters-clean/${String(ch.index).padStart(2, '0')}.md`),
         'utf8'
       );
+      const { title, content: text } = splitLeadingChapterTitle(cleanedText);
 
       let segments: ScriptSegment[];
       if (!analysis.isFiction) {
@@ -105,7 +155,7 @@ export async function runScript(
         throw new Error(`New or unresolved speakers in chapter ${ch.index + 1}: ${[...new Set(candidates.map((s) => s.speaker))].join(', ')}. Review ${candidatesFile}, update chapter-characters/${String(ch.index).padStart(2, '0')}.json with supported identities, then run list-characters --rerun and script.`);
       }
       fs.rmSync(work.path(candidatesFile), { force: true });
-      const script: ChapterScript = { index: ch.index, characterRegistryHash: registryHash, segments: filterNarratableSegments(segments) };
+      const script: ChapterScript = { index: ch.index, characterRegistryHash: registryHash, segments: withChapterTitle(segments, title) };
       work.writeJson(scriptFile, script);
       update({ phase: 'completed', completedChapters: chapterPosition + 1 });
     });
