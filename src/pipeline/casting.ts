@@ -65,7 +65,7 @@ export async function runCasting(work: WorkDir): Promise<Casting> {
 
 Rules:
 - Do not select a provider, model, or voice ID. Describe the desired sound only.
-- Give every speaker presentation, approximate age, a short tone list, language, accent, and standing delivery instructions.
+- Give every speaker presentation, approximate age, a short tone list, language, accent, and standing delivery instructions. Use a BCP 47 primary language code for language (for example, "en", "fr", or "ja").
 - Use "unknown" or "unspecified" where evidence is absent.
 - The narrator's instructions describe steady audiobook narration. Character instructions differentiate age, accent, class, and personality.
 - Every character listed must appear in "characters". Write instructions for every speaker.`,

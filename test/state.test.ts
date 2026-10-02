@@ -49,6 +49,24 @@ describe('WorkDir chapter completion', () => {
     expect(changed.sourceChanged()).toBe(false);
   });
 
+  it('migrates a legacy EPUB state manifest without losing its completion record', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lisen-state-'));
+    temporaryRoots.push(root);
+    const epub = path.join(root, 'book.epub');
+    fs.writeFileSync(epub, 'legacy source');
+    const work = new WorkDir(epub, root);
+    fs.writeFileSync(work.path('state.json'), JSON.stringify({
+      epub,
+      epubHash: crypto.createHash('sha256').update('legacy source').digest('hex').slice(0, 16),
+      completed: { extract: '2026-01-01T00:00:00.000Z' },
+      chapterCompleted: {},
+    }));
+
+    const migrated = new WorkDir(epub, root);
+    expect(migrated.snapshot()).toMatchObject({ version: 2, source: epub, sourceFormat: 'epub' });
+    expect(migrated.isDone('extract')).toBe(true);
+  });
+
   it('detects hand edits to the cast or bindings after synthesis', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lisen-state-'));
     temporaryRoots.push(root);

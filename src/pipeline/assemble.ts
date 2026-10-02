@@ -31,7 +31,7 @@ function escapeMeta(s: string): string {
  * Stage 9: concatenate cached segments into per-chapter M4A files, then all
  * chapters into a single M4B with chapter markers, tags and cover art.
  */
-export async function runAssemble(work: WorkDir, outDir: string, chapterIndexes?: number[]): Promise<string> {
+export async function runAssemble(work: WorkDir, outDir?: string, chapterIndexes?: number[]): Promise<string> {
   throwIfTaskCancelled();
   reportProgress({ activity: 'Reading synthesized chapter manifests' });
   const meta = work.readJson<BookMetadata>('metadata.json');
@@ -118,12 +118,15 @@ export async function runAssemble(work: WorkDir, outDir: string, chapterIndexes?
   fs.rmSync(concatList);
 
   // 4. Mux metadata + cover into the final .m4b.
-  fs.mkdirSync(outDir, { recursive: true });
+  // Keep the finished audiobook alongside the artifacts that produced it by
+  // default. An explicit output directory remains available for exports.
+  const outputDir = outDir ? path.resolve(outDir) : work.root;
+  fs.mkdirSync(outputDir, { recursive: true });
   const safeTitle = meta.title.replace(/[\\/:*?"<>|]/g, '-').trim() || 'book';
   const selectionLabel = chapterIndexes?.length
     ? ` - chapters ${[...chapterIndexes].sort((a, b) => a - b).join('-')}`
     : '';
-  const outFile = path.resolve(outDir, `${safeTitle}${selectionLabel}.m4b`);
+  const outFile = path.join(outputDir, `${safeTitle}${selectionLabel}.m4b`);
 
   const args = ['-i', bookM4a, '-i', ffmetaFile];
   if (meta.coverFile && fs.existsSync(work.path(meta.coverFile))) {

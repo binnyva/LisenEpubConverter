@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filterNarratableSegments, splitLeadingChapterTitle, withChapterTitle } from '../src/pipeline/script.js';
+import { filterNarratableSegments, findNarrationAuditCandidates, splitCharacterDialogueAndNarration, splitLeadingChapterTitle, splitTaggedNarratorDialogue, withChapterTitle } from '../src/pipeline/script.js';
 
 describe('filterNarratableSegments', () => {
   it('removes decorative asterisk section dividers', () => {
@@ -55,5 +55,45 @@ describe('filterNarratableSegments', () => {
 
     expect(segments).toHaveLength(2);
     expect(segments[0].text).toBe('… Viewfinder …');
+  });
+});
+
+describe('findNarrationAuditCandidates', () => {
+  it('flags a character segment that mixes quoted dialogue with narration', () => {
+    expect(findNarrationAuditCandidates([
+      {
+        speaker: 'Alexander Adell',
+        text: '"It is amazing," said Adell. He stirred his drink. "Forever."',
+        confidence: 'high',
+      },
+      { speaker: 'Alexander Adell', text: '"Only dialogue."', confidence: 'high' },
+      { speaker: 'narrator', text: 'Adell stirred his drink.', confidence: 'high' },
+    ])).toEqual([0]);
+  });
+
+  it('also flags a narrator segment with an explicit dialogue tag', () => {
+    expect(findNarrationAuditCandidates([
+      { speaker: 'narrator', text: '"It is amazing," said Adell. He stirred his drink.', confidence: 'high' },
+    ])).toEqual([0]);
+  });
+
+  it('separates quoted character dialogue from a trailing dialogue tag', () => {
+    expect(splitCharacterDialogueAndNarration({
+      speaker: 'Bertram Lupov', text: '"Not forever," he said.', confidence: 'high',
+    })).toEqual([
+      { speaker: 'Bertram Lupov', text: '"Not forever,"', confidence: 'high' },
+      { speaker: 'narrator', text: 'he said.', confidence: 'high' },
+    ]);
+  });
+
+  it('recovers a quoted narrator segment when its tag names a unique character surname', () => {
+    expect(splitTaggedNarratorDialogue({
+      speaker: 'narrator', text: '"It is amazing," said Adell. He stirred his drink.', confidence: 'high',
+    }, [{
+      name: 'Alexander Adell', aliases: [], sex: 'male', age: 'unknown', race: 'unknown', class: 'unknown', country: 'unknown', importance: 'main',
+    }])).toEqual([
+      { speaker: 'Alexander Adell', text: '"It is amazing,"', confidence: 'high' },
+      { speaker: 'narrator', text: 'said Adell. He stirred his drink.', confidence: 'high' },
+    ]);
   });
 });

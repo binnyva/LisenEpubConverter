@@ -2,17 +2,26 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { STAGES, type Stage } from './config.js';
+import { isRemoteSource, readSource, sourceFormatForPath, type SourceFormat, type SourceMetadataOverrides } from './source/read.js';
 
 export interface WorkState {
-  epub: string;
-  epubHash: string;
+  version: 2;
+  source: string;
+  sourceHash: string;
+  sourceFormat: SourceFormat;
+  metadataOverrides?: SourceMetadataOverrides;
   completed: Partial<Record<Stage, string>>; // stage -> ISO timestamp
-  /** The EPUB currently selected differs from the source that produced the completed stages. */
+  /** The currently selected file differs from the source that produced the completed stages. */
   sourceChanged?: boolean;
   /** Completion timestamps for stages that can be run a chapter at a time. */
   chapterCompleted?: Partial<Record<'chapters' | 'script' | 'synth', Record<string, string>>>;
   /** Hash of the cast and concrete bindings used by the last completed synthesis. */
   synthesisInputHash?: string;
+}
+
+interface LegacyWorkState extends Omit<WorkState, 'version' | 'source' | 'sourceHash' | 'sourceFormat'> {
+  epub?: string;
+  epubHash?: string;
 }
 
 /**
@@ -22,39 +31,46 @@ export interface WorkState {
 export class WorkDir {
   readonly root: string;
   private state: WorkState;
-  private readonly currentEpubHash: string;
+  private readonly currentSourceHash: string;
 
-  constructor(epubPath: string, workRoot: string) {
-    const slug = path
-      .basename(epubPath)
-      .replace(/\.epub$/i, '')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-|-$/g, '');
-    this.root = path.resolve(workRoot, slug);
+  constructor(sourcePath: string, workRoot: string, title?: string, existingRoot?: string) {
+    const sourceFormat = sourceFormatForPath(sourcePath);
+    if (!sourceFormat) throw new Error('Unsupported source format.');
+    const remote = isRemoteSource(sourcePath);
+    const sourceName = remote ? urlSlug(sourcePath) : path.basename(sourcePath, path.extname(sourcePath));
+    const slug = slugify(title ?? sourceName);
+    // A direct WorkDir construction retains the legacy filename fallback for
+    // programmatic callers. New user-facing workspaces use openWorkDir(),
+    // which supplies the source title.
+    this.root = existingRoot ?? path.resolve(workRoot, sourceFormat === 'epub' ? slug : `${slug}-${sourceFormat}`);
     fs.mkdirSync(this.root, { recursive: true });
 
-    this.currentEpubHash = crypto
+    this.currentSourceHash = crypto
       .createHash('sha256')
-      .update(fs.readFileSync(epubPath))
+      .update(remote ? sourcePath : fs.readFileSync(sourcePath))
       .digest('hex')
       .slice(0, 16);
 
     const statePath = this.path('state.json');
     if (fs.existsSync(statePath)) {
-      this.state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-      if (this.state.epubHash !== this.currentEpubHash) {
-        console.warn('EPUB file changed since last run — rebuild Extract before using the existing pipeline output.');
-        this.state.epub = epubPath;
+      this.state = migrateState(JSON.parse(fs.readFileSync(statePath, 'utf8')) as WorkState | LegacyWorkState, sourcePath, sourceFormat, this.currentSourceHash);
+      // URLs are refreshed only by Extract. Avoid a network request whenever a
+      // work folder is inspected or a later stage resumes.
+      const currentHash = remote && this.state.source === sourcePath ? this.state.sourceHash : this.currentSourceHash;
+      if (this.state.sourceHash !== currentHash) {
+        console.warn('Source file changed since last run — rebuild Extract before using the existing pipeline output.');
+        this.state.source = sourcePath;
+        this.state.sourceFormat = sourceFormat;
         this.state.sourceChanged = true;
         this.save();
-      } else if (this.state.epub !== epubPath || this.state.sourceChanged) {
-        this.state.epub = epubPath;
+      } else if (this.state.source !== sourcePath || this.state.sourceChanged) {
+        this.state.source = sourcePath;
+        this.state.sourceFormat = sourceFormat;
         delete this.state.sourceChanged;
         this.save();
       }
     } else {
-      this.state = { epub: epubPath, epubHash: this.currentEpubHash, completed: {}, chapterCompleted: {} };
+      this.state = { version: 2, source: sourcePath, sourceHash: this.currentSourceHash, sourceFormat, completed: {}, chapterCompleted: {} };
       this.save();
     }
   }
@@ -82,11 +98,38 @@ export class WorkDir {
     return this.state.sourceChanged === true;
   }
 
-  /** Accept the currently selected EPUB after an explicit Extract rebuild. */
-  acceptCurrentEpub(): void {
-    this.state.epubHash = this.currentEpubHash;
+  /** Accept the currently selected source after an explicit Extract rebuild. */
+  acceptCurrentSource(): void {
+    if (!isRemoteSource(this.state.source)) this.state.sourceHash = this.currentSourceHash;
     delete this.state.sourceChanged;
     this.save();
+  }
+
+  /** Record the exact HTML downloaded during Extract for a URL source. */
+  recordDownloadedSourceHash(contentHash: string): void {
+    if (!isRemoteSource(this.state.source)) return;
+    this.state.sourceHash = contentHash;
+    delete this.state.sourceChanged;
+    this.save();
+  }
+
+  /** @deprecated Use acceptCurrentSource. */
+  acceptCurrentEpub(): void {
+    this.acceptCurrentSource();
+  }
+
+  metadataOverrides(): SourceMetadataOverrides | undefined {
+    return this.state.metadataOverrides ? structuredClone(this.state.metadataOverrides) : undefined;
+  }
+
+  /** Changing displayed metadata makes every later artifact stale. */
+  setMetadataOverrides(overrides: SourceMetadataOverrides): boolean {
+    const next = compactOverrides(overrides);
+    if (JSON.stringify(next) === JSON.stringify(this.state.metadataOverrides ?? {})) return false;
+    if (Object.keys(next).length) this.state.metadataOverrides = next;
+    else delete this.state.metadataOverrides;
+    this.invalidateFrom('extract');
+    return true;
   }
 
   completedChapters(stage: 'chapters' | 'script' | 'synth'): number[] {
@@ -178,4 +221,101 @@ export class WorkDir {
     });
     return crypto.createHash('sha256').update(inputs.join('\x1f')).digest('hex');
   }
+}
+
+/**
+ * Open a workspace for a source. Existing folders are found by their saved
+ * source path; a new folder is named from the document title, never its path
+ * or URL. Reading title metadata for a URL may download the document once.
+ */
+export async function openWorkDir(
+  sourcePath: string,
+  workRoot: string,
+  metadataOverrides?: SourceMetadataOverrides
+): Promise<WorkDir> {
+  const existingRoot = findWorkRoot(sourcePath, workRoot);
+  if (existingRoot) return new WorkDir(sourcePath, workRoot, undefined, existingRoot);
+
+  const source = await readSource(sourcePath, metadataOverrides);
+  return new WorkDir(sourcePath, workRoot, undefined, unusedWorkRoot(workRoot, source.title));
+}
+
+function findWorkRoot(sourcePath: string, workRoot: string): string | undefined {
+  if (!fs.existsSync(workRoot)) return undefined;
+  const currentHash = !isRemoteSource(sourcePath) && fs.existsSync(sourcePath)
+    ? sourceHash(sourcePath)
+    : undefined;
+  for (const entry of fs.readdirSync(workRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    const root = path.resolve(workRoot, entry.name);
+    const statePath = path.join(root, 'state.json');
+    if (!fs.existsSync(statePath)) continue;
+    try {
+      const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as { source?: unknown; epub?: unknown; sourceHash?: unknown; epubHash?: unknown };
+      if (state.source === sourcePath || state.epub === sourcePath ||
+        (currentHash !== undefined && (state.sourceHash === currentHash || state.epubHash === currentHash))) return root;
+    } catch {
+      // Ignore malformed folders; they are not a workspace for this source.
+    }
+  }
+  return undefined;
+}
+
+function sourceHash(sourcePath: string): string {
+  return crypto.createHash('sha256').update(fs.readFileSync(sourcePath)).digest('hex').slice(0, 16);
+}
+
+function unusedWorkRoot(workRoot: string, title: string): string {
+  const base = slugify(title);
+  let candidate = path.resolve(workRoot, base);
+  let suffix = 2;
+  while (fs.existsSync(candidate)) {
+    candidate = path.resolve(workRoot, `${base}-${suffix}`);
+    suffix += 1;
+  }
+  return candidate;
+}
+
+function migrateState(
+  raw: WorkState | LegacyWorkState,
+  sourcePath: string,
+  sourceFormat: SourceFormat,
+  sourceHash: string
+): WorkState {
+  if ('source' in raw && typeof raw.source === 'string') {
+    return { ...raw, version: 2, sourceFormat: raw.sourceFormat ?? sourceFormat, chapterCompleted: raw.chapterCompleted ?? {} } as WorkState;
+  }
+  const legacy = raw as LegacyWorkState;
+  return {
+    version: 2,
+    source: legacy.epub ?? sourcePath,
+    sourceHash: legacy.epubHash ?? sourceHash,
+    sourceFormat: sourceFormatForPath(legacy.epub ?? '') ?? sourceFormat,
+    completed: legacy.completed ?? {},
+    chapterCompleted: legacy.chapterCompleted ?? {},
+    sourceChanged: legacy.sourceChanged,
+    synthesisInputHash: legacy.synthesisInputHash,
+  };
+}
+
+function compactOverrides(overrides: SourceMetadataOverrides): SourceMetadataOverrides {
+  return Object.fromEntries(Object.entries(overrides)
+    .map(([key, value]) => [key, value?.trim()])
+    .filter(([, value]) => Boolean(value))) as SourceMetadataOverrides;
+}
+
+function urlSlug(sourceUrl: string): string {
+  const url = new URL(sourceUrl);
+  const pathPart = url.pathname.replace(/\/$/, '') || 'page';
+  const identity = crypto.createHash('sha256').update(sourceUrl).digest('hex').slice(0, 8);
+  return `${url.hostname}-${pathPart}-${identity}`;
+}
+
+function slugify(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '') || 'untitled';
 }

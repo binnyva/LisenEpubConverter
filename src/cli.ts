@@ -15,34 +15,39 @@ for (const envFile of [
   }
 }
 import { config, STAGES, type Stage } from './config.js';
-import { WorkDir } from './state.js';
+import { openWorkDir } from './state.js';
 import { checkApiKeys, checkFfmpeg } from './checks.js';
 import { discoverBooks, runStage } from './pipeline/runner.js';
 import { startLocalUi } from './ui/server.js';
 import { defaultVoiceTarget, importVoiceLibrary, loadVoiceLibrary, refreshVoiceLibrary, type VoiceTarget } from './voices/library.js';
+import { sourceFormatForPath, sourceIsAvailable, supportedSourceDescription, type SourceMetadataOverrides } from './source/read.js';
 
 const program = new Command();
 program
   .name('lisen')
-  .description('Convert an EPUB into a multi-voice M4B audiobook');
+  .description('Convert a document into a multi-voice M4B audiobook');
 
 program
   .command('convert')
-  .argument('<epub>', 'path to the .epub file')
-  .option('--out <dir>', 'output directory for the .m4b', '.')
+  .argument('<source>', `path to a source file (${supportedSourceDescription()})`)
+  .option('--out <dir>', 'output directory for the .m4b (default: the book work folder)')
   .option('--work <dir>', 'work directory for intermediate artifacts', './work')
   .option('--from <stage>', `re-run from a stage (${STAGES.join(', ')})`)
   .option('--force', 're-run the whole pipeline from scratch', false)
   .option('--dry-run', 'stop before synthesis (no TTS spend) so script/casting can be reviewed', false)
-  .action(async (epub: string, opts) => {
-    if (!fs.existsSync(epub)) {
-      console.error(`Error: file not found: ${epub}`);
+  .option('--title <title>', 'override title extracted from the source')
+  .option('--author <author>', 'override author extracted from the source')
+  .option('--language <language>', 'override source language (for example en or pt-BR)')
+  .action(async (source: string, opts) => {
+    assertSource(source);
+    if (!sourceIsAvailable(source)) {
+      console.error(`Error: file not found: ${source}`);
       process.exit(1);
     }
     checkFfmpeg();
     checkApiKeys();
 
-    const work = new WorkDir(epub, opts.work);
+    const work = await openWorkDir(source, opts.work, sourceMetadataFromOptions(opts));
     console.log(`Work directory: ${work.root}`);
 
     let startAt = 0;
@@ -63,11 +68,12 @@ program
         return;
       }
       const result = await runStage({
-        epubPath: epub,
+        sourcePath: source,
         workRoot: opts.work,
         outDir: opts.out,
         stage,
         rebuild: (opts.force || Boolean(opts.from)) && index === startAt,
+        metadataOverrides: sourceMetadataFromOptions(opts),
         onEvent: (event) => console.log(`[${event.stage}] ${event.message}`),
       });
       if (result.output) console.log(`\nDone: ${result.output}`);
@@ -76,15 +82,16 @@ program
 
 program
   .command('status')
-  .argument('<epub>', 'path to the .epub file')
+  .argument('<source>', `path to a source file (${supportedSourceDescription()})`)
   .option('--work <dir>', 'work directory', './work')
   .option('--json', 'print machine-readable JSON')
-  .action((epub: string, opts) => {
-    if (!fs.existsSync(epub)) {
-      console.error(`Error: file not found: ${epub}`);
+  .action(async (source: string, opts) => {
+    assertSource(source);
+    if (!sourceIsAvailable(source)) {
+      console.error(`Error: file not found: ${source}`);
       process.exit(1);
     }
-    const work = new WorkDir(epub, opts.work);
+    const work = await openWorkDir(source, opts.work);
     if (opts.json) {
       console.log(JSON.stringify({ root: work.root, state: work.snapshot(), stages: work.status() }, null, 2));
       return;
@@ -110,23 +117,27 @@ program
       return;
     }
     for (const book of books) {
-      console.log(`${book.epubAvailable ? '✔' : '!' } ${book.epubPath}`);
+      console.log(`${book.sourceAvailable ? '✔' : '!' } ${book.sourcePath}`);
     }
   });
 
 program
   .command('run')
-  .argument('<epub>', 'path to the .epub file')
+  .argument('<source>', `path to a source file (${supportedSourceDescription()})`)
   .argument('<stage>', `stage to run (${STAGES.join(', ')})`)
   .option('--chapters <indexes>', 'comma-separated chapter indexes (for chapters, script, synth, or assemble)')
   .option('--rerun', 'execute the stage even if it is already complete')
   .option('--rebuild', 'clear this stage and all derived output before running')
-  .option('--out <dir>', 'output directory for assembled M4Bs', '.')
+  .option('--out <dir>', 'output directory for assembled M4Bs (default: the book work folder)')
   .option('--work <dir>', 'work directory', './work')
   .option('--json', 'print machine-readable JSON')
-  .action(async (epub: string, stage: string, opts) => {
+  .option('--title <title>', 'override title extracted from the source')
+  .option('--author <author>', 'override author extracted from the source')
+  .option('--language <language>', 'override source language (for example en or pt-BR)')
+  .action(async (source: string, stage: string, opts) => {
     if (!STAGES.includes(stage as Stage)) throw new Error(`Unknown stage "${stage}". Stages: ${STAGES.join(', ')}`);
-    if (!fs.existsSync(epub)) throw new Error(`file not found: ${epub}`);
+    assertSource(source);
+    if (!sourceIsAvailable(source)) throw new Error(`file not found: ${source}`);
     if (stage === 'assemble') checkFfmpeg();
     if (['analyze', 'chapters', 'script', 'casting'].includes(stage)) checkApiKeys([config.llmProvider]);
     if (stage === 'synth') checkApiKeys([config.ttsProvider]);
@@ -134,13 +145,14 @@ program
       ? String(opts.chapters).split(',').map((value) => Number.parseInt(value.trim(), 10))
       : undefined;
     const result = await runStage({
-      epubPath: epub,
+      sourcePath: source,
       workRoot: opts.work,
       outDir: opts.out,
       stage: stage as Stage,
       chapterIndexes: chapters,
       rerun: opts.rerun,
       rebuild: opts.rebuild,
+      metadataOverrides: sourceMetadataFromOptions(opts),
       onEvent: opts.json ? undefined : (event) => console.log(`[${event.stage}] ${event.message}`),
     });
     if (opts.json) {
@@ -151,7 +163,7 @@ program
 program
   .command('ui')
   .option('--work <dir>', 'work directory', './work')
-  .option('--out <dir>', 'output directory for assembled M4Bs', '.')
+  .option('--out <dir>', 'output directory for assembled M4Bs (default: the book work folder)')
   .option('--port <number>', 'local port', '3188')
   .action(async (opts) => {
     const port = Number.parseInt(opts.port, 10);
@@ -197,15 +209,16 @@ voices
   });
 voices
   .command('apply')
-  .argument('<epub>', 'path to the .epub file')
+  .argument('<source>', `path to a source file (${supportedSourceDescription()})`)
   .option('--provider <provider>', 'voice provider (openai, openrouter, or fish)')
   .option('--model <model>', 'TTS model')
   .option('--library <file>', 'voice library JSON file')
   .option('--work <dir>', 'work directory', './work')
-  .option('--out <dir>', 'output directory', '.')
-  .action(async (epub, opts) => {
-    if (!fs.existsSync(epub)) throw new Error(`file not found: ${epub}`);
-    await runStage({ epubPath: epub, workRoot: opts.work, outDir: opts.out, stage: 'voices', voiceTarget: voiceTargetFromOptions(opts), voiceLibraryFile: opts.library, rerun: true, onEvent: (event) => console.log(`[${event.stage}] ${event.message}`) });
+  .option('--out <dir>', 'output directory for assembly (default: the book work folder)')
+  .action(async (source, opts) => {
+    assertSource(source);
+    if (!sourceIsAvailable(source)) throw new Error(`file not found: ${source}`);
+    await runStage({ sourcePath: source, workRoot: opts.work, outDir: opts.out, stage: 'voices', voiceTarget: voiceTargetFromOptions(opts), voiceLibraryFile: opts.library, rerun: true, onEvent: (event) => console.log(`[${event.stage}] ${event.message}`) });
   });
 
 function voiceTargetFromOptions(opts: { provider?: string; model?: string }): VoiceTarget {
@@ -214,6 +227,16 @@ function voiceTargetFromOptions(opts: { provider?: string; model?: string }): Vo
   if (provider !== 'openai' && provider !== 'openrouter' && provider !== 'fish') throw new Error('Voice provider must be "openai", "openrouter", or "fish".');
   if (provider !== fallback.provider && !opts.model) throw new Error('Specify --model when selecting a different voice provider.');
   return { provider, model: opts.model ?? fallback.model };
+}
+
+function assertSource(source: string): void {
+  if (!sourceFormatForPath(source)) throw new Error(`Unsupported source format. Choose ${supportedSourceDescription()}.`);
+}
+
+function sourceMetadataFromOptions(opts: { title?: string; author?: string; language?: string }): SourceMetadataOverrides | undefined {
+  const overrides = Object.fromEntries(Object.entries({ title: opts.title, author: opts.author, language: opts.language })
+    .filter(([, value]) => typeof value === 'string' && value.trim())) as SourceMetadataOverrides;
+  return Object.keys(overrides).length ? overrides : undefined;
 }
 
 program.parseAsync().catch((err) => {

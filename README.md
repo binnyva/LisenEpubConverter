@@ -1,6 +1,6 @@
-# Lisen EPUB Convertor
+# Lisen Document Convertor
 
-CLI and local web workspace for [lisentome.com](https://lisentome.com/): converts an EPUB into a multi-voice M4B audiobook. An LLM analyzes the book, attributes dialogue to characters, and describes each speaker's desired voice. A shared voice library supplies concrete voice assignments; ffmpeg assembles the result into a single `.m4b` with chapter markers, tags, and cover art. OpenAI and OpenRouter are supported for text processing and speech synthesis.
+CLI and local web workspace for [lisentome.com](https://lisentome.com/): converts an EPUB, text PDF, HTML, Markdown document, or an HTML page URL into a multi-voice M4B audiobook. An LLM analyzes the book, attributes dialogue to characters, and describes each speaker's desired voice. A shared voice library supplies concrete voice assignments; ffmpeg assembles the result into a single `.m4b` with chapter markers, tags, and cover art. OpenAI and OpenRouter are supported for text processing and speech synthesis.
 
 ## Requirements
 
@@ -12,9 +12,10 @@ CLI and local web workspace for [lisentome.com](https://lisentome.com/): convert
 
 ```bash
 npm install
-npm run dev -- convert book.epub --dry-run       # prepare scripts, casting, and voices
-npm run dev -- convert book.epub                 # resume through paid TTS and assembly
-npm run dev -- status book.epub                  # stage completion
+npm run dev -- convert story.md --dry-run         # prepare scripts, casting, and voices
+npm run dev -- convert story.pdf                  # resume through paid TTS and assembly
+npm run dev -- status story.html                  # stage completion
+npm run dev -- convert https://example.com/story  # download HTML, then convert
 npm run dev -- ui                               # local web workspace
 ```
 
@@ -24,7 +25,7 @@ Options for `convert`:
 
 | Flag | Meaning |
 | --- | --- |
-| `--out <dir>` | Where the final `.m4b` goes (default `.`) |
+| `--out <dir>` | Export the final `.m4b` to a different directory (by default it is saved in that book's work folder) |
 | `--work <dir>` | Work directory for intermediate artifacts (default `./work`) |
 | `--from <stage>` | Rebuild that stage and derived artifacts, then continue: extract, analyze, chapters, list-characters, script, casting, voices, synth, assemble |
 | `--force` | Rebuild from extract and continue; retain the TTS audio cache |
@@ -33,10 +34,10 @@ Options for `convert`:
 ## Pipeline
 
 ```
-EPUB → extract → analyze → chapters → list-characters → script → casting → voices → synth → assemble → book.m4b
+Source document → extract → analyze → chapters → list-characters → script → casting → voices → synth → assemble → book.m4b
 ```
 
-1. **extract** — EPUB → one markdown file per chapter (`chapters/`), plus `metadata.json` and cover. Images become their alt text, links keep only their text, footnote markers are dropped.
+1. **extract** — source document → one markdown file per chapter (`chapters/`), plus `metadata.json` and an EPUB cover when available. HTML becomes audio-friendly Markdown; Markdown is preserved; a standalone PDF/HTML/Markdown story becomes one chapter.
 2. **analyze** — sampled LLM overview: fiction detection, provisional book summary and character candidates, author profile, and a narrate/skip decision per chapter (ToC, acknowledgments, license pages etc. are skipped).
 3. **chapters** — per-chapter summary, minimal audio-friendly cleanup (`chapters-clean/`), and speaking-character observations with evidence (`chapter-characters/`). Discovery reads every chunk of each narratable chapter, including late appearances and unnamed speakers.
 4. **list-characters** — **List Characters** consolidates all narratable chapters into the book-specific `characters.json` registry. This offline stage merges exact names and unambiguous explicit aliases, preserves evidence and stable IDs, and flags uncertain identities or conflicting traits. Generic unnamed roles are scoped to their chapter.
@@ -46,15 +47,15 @@ EPUB → extract → analyze → chapters → list-characters → script → cas
 8. **synth** — validate voice bindings, split speakable text into requests, and cache completed MP3s by content hash in `audio-cache/`. Existing cache files are reused. Requests include a language guard to keep the narration in the book's language.
 9. **assemble** — ffmpeg concat into per-chapter M4As, then a single `.m4b` with chapter markers, tags, and cover art.
 
-Every stage records completion in `work/<book>/state.json`; re-running resumes where it left off. `chapters`, `script`, and `synth` track chapter completion; synthesis also reuses individual cached segments. Assembly reuses encoded chapter M4As. If the EPUB content changes, existing history and artifacts are preserved and further runs are blocked until an explicit Extract rebuild:
+Every stage records completion in `work/<book>/state.json`; re-running resumes where it left off. `chapters`, `script`, and `synth` track chapter completion; synthesis also reuses individual cached segments. Assembly reuses encoded chapter M4As. If the source content changes, existing history and artifacts are preserved and further runs are blocked until an explicit Extract rebuild:
 
 ```bash
-npm run dev -- run book.epub extract --rebuild
+npm run dev -- run story.pdf extract --rebuild
 ```
 
 ### Local workspace and individual stages
 
-Run `npm run dev -- ui` and open `http://127.0.0.1:3188`. Use `--port`, `--work`, and `--out` to change the port, work root, and output directory. The server binds to localhost and runs one stage job at a time; provider requests originate from Node using the configured API keys.
+Run `npm run dev -- ui` and open `http://127.0.0.1:3188`. Use `--port` and `--work` to change the port and work root. Finished M4Bs are saved in each book's work folder; pass `--out` only to export them elsewhere. The server binds to localhost and runs one stage job at a time; provider requests originate from Node using the configured API keys.
 
 The workspace shows the provisional book analysis, discovered characters and registry review issues, chapter readiness, and editable speaker instructions and voice assignments. Use the settings gear to choose an OpenAI or OpenRouter **text-processing** provider and a model for new Analyze, Chapters, List Characters, Script, and Casting jobs. The model field offers fuzzy-matched suggestions and one-click starred models. Select chapters, use **Run** to rerun a stage or **Rebuild all** to clear its derived output, and use **Cmd** to copy the corresponding CLI command. The stage activity panel retains start/completion events, retry warnings, and failures for the displayed job. Saving casting changes makes synthesis and assembly stale while preserving cached MP3s.
 
@@ -71,22 +72,24 @@ The model list lives in [`library/preferred-models.json`](library/preferred-mode
 
 Set `LISEN_PREFERRED_MODELS_FILE` to use a different list. The UI choice does not change `.env` or CLI defaults, and synthesis continues to use the provider/model saved in `voice-bindings.json`.
 
-EPUBs remain at their original paths. A work folder with a missing source can still be inspected; open the source at its new path with the same filename slug to relink it. Renaming the EPUB changes the slug and selects a different work folder.
+Source files remain at their original paths. New work folders are named from the document title (or a supplied `--title` override), not from the source filename or URL. If two works have the same title, the later folder receives a numeric suffix. A work folder with a missing source can still be inspected; open the source at its new path to relink it. Existing folders retain their original names.
 
 The CLI offers the same manual control:
 
 ```bash
 npm run dev -- books --json
-npm run dev -- status book.epub --json
-npm run dev -- run book.epub list-characters  # after all narratable chapters
-npm run dev -- run book.epub script --chapters 3,4
-npm run dev -- run book.epub synth --chapters 3,4
-npm run dev -- run book.epub assemble --chapters 3,4 --out output
-npm run dev -- run book.epub script --chapters 3 --rerun
-npm run dev -- run book.epub script --rebuild  # clear derived output and rerun script
+npm run dev -- status story.md --json
+npm run dev -- run story.md list-characters  # after all narratable chapters
+npm run dev -- run story.md script --chapters 0
+npm run dev -- run story.md synth --chapters 0
+npm run dev -- run story.md assemble --chapters 0
+npm run dev -- run story.md script --chapters 0 --rerun
+npm run dev -- run story.md script --rebuild  # clear derived output and rerun script
 ```
 
-`run` executes exactly one stage and checks prerequisites; it does not run missing earlier stages. `chapters`, `script`, `synth`, and `assemble` accept `--chapters` using zero-based EPUB chapter indexes (the UI displays chapter numbers starting at 1). Selected assembly creates a separate file such as `Book Title - chapters 3-4.m4b` and does not mark full-book assembly complete. `books`, `status`, and `run` support `--json`; stage code may still emit progress or warnings during `run --json`.
+`run` executes exactly one stage and checks prerequisites; it does not run missing earlier stages. `chapters`, `script`, `synth`, and `assemble` accept zero-based chapter indexes (the UI displays chapter numbers starting at 1). Standalone stories have chapter `0`. Selected assembly creates a separate file such as `Book Title - chapters 0.m4b` and does not mark full-book assembly complete. `books`, `status`, and `run` support `--json`; stage code may still emit progress or warnings during `run --json`.
+
+Supported sources are `http://` or `https://` HTML URLs plus `.epub`, `.pdf`, `.html`, `.htm`, `.md`, and `.markdown` files. A URL is downloaded when a new work folder needs its title, and Extract downloads it again to save the source content; run `extract --rebuild` to download a fresh copy. URL imports accept HTML or text responses up to 10 MB. Use `--title`, `--author`, and `--language` on `convert` or `run … extract` to override missing source metadata. Text PDFs are supported; scanned or image-only PDFs need OCR before import, and password-protected PDFs must be unlocked first.
 
 All stages report activity in the CLI and the UI’s Stage activity panel. Analyze and Casting show preparation, a waiting indicator during their single model request, and saving. Chapters and Script show text processed by block and completed chapter counts. Synth shows audio segments ready, including cache hits. Assembly shows encoded chapters, duration reads, joining, and M4B export; ffmpeg runs asynchronously so the UI stays responsive. Extract, List Characters, and Voices report local-work milestones and counts. Short local stages may finish between UI polls; their milestones remain in the activity log.
 
@@ -117,9 +120,10 @@ work/alice/
   voice-bindings.json      # speaker → concrete library/provider/model/voice choice
   audio-cache/             # one mp3 per synthesized segment, keyed by hash
   audio/                   # per-chapter m4a + segment manifests
+  Book Title.m4b           # assembled audiobook
 ```
 
-Text artifacts are inspectable JSON/markdown, so outputs can be reviewed or corrected before the next stage runs. The final M4B is written to `--out` using the book metadata title. Completed cache files are keyed by provider, model, native voice ID, delivery instructions, and speakable text; changing those inputs can incur new TTS charges. Rebuilds retain the cache and previously exported M4Bs; assembly overwrites a matching output filename.
+Text artifacts are inspectable JSON/markdown, so outputs can be reviewed or corrected before the next stage runs. The final M4B is saved in its book's work folder using the book metadata title. Pass `--out` to export it to another directory. Completed cache files are keyed by provider, model, native voice ID, delivery instructions, and speakable text; changing those inputs can incur new TTS charges. Rebuilds retain the cache and previously assembled M4Bs; assembly overwrites a matching output filename.
 
 ## Configuration
 
@@ -214,6 +218,6 @@ npm test                # vitest, fully offline
 npm run test:watch      # offline tests in watch mode
 ```
 
-The `lisen` executable points to `dist/cli.js`; build before using an installed or linked binary. Tests cover EPUB/markdown parsing, text and script cleanup, provider requests with mocks, voice libraries and migration, state tracking, retry events, and UI activity rendering. No live LLM or TTS requests are made by the test suite.
+The `lisen` executable points to `dist/cli.js`; build before using an installed or linked binary. Tests cover EPUB, PDF, HTML, and Markdown extraction; text and script cleanup; provider requests with mocks; voice libraries and migration; state tracking; retry events; and UI activity rendering. No live LLM or TTS requests are made by the test suite.
 
 See [AGENTS.md](AGENTS.md) for a code map and contributor conventions.

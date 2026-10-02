@@ -4,6 +4,7 @@ import { jsonCall } from '../providers/llm/openai.js';
 import { config } from '../config.js';
 import { markdownToSpeakable } from '../epub/markdown.js';
 import { hasNarratableText, normalizeNonBreakingSpaces, splitIntoBlocks } from '../util/text.js';
+import { reportWarning } from '../util/warnings.js';
 import type { WorkDir } from '../state.js';
 import { characterRegistryHash, readCharacterRegistry } from './list-characters.js';
 import { withChapterProgress, type ChapterProgress, type ProgressReporter } from '../util/progress.js';
@@ -21,6 +22,213 @@ const SegmentsSchema = z.object({ segments: z.array(ScriptSegmentSchema) });
 const VerifySchema = z.object({
   attributions: z.array(z.object({ id: z.number(), speaker: z.string() })),
 });
+const NarrationRepairSchema = z.object({
+  repairs: z.array(z.object({
+    id: z.number().int().nonnegative(),
+    segments: z.array(ScriptSegmentSchema).min(1),
+  })),
+});
+
+/** Compare text coverage while allowing whitespace to move across segment boundaries. */
+function coverageText(text: string): string {
+  return normalizeNonBreakingSpaces(text).replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Find character-labelled segments which probably include narration. This is
+ * deliberately conservative: character segments with quoted speech plus text
+ * outside the quotes are suspicious; narrator segments are included only
+ * when the surrounding text has an explicit dialogue-attribution verb.
+ */
+export function findNarrationAuditCandidates(segments: ScriptSegment[]): number[] {
+  return segments.flatMap((segment, id) => {
+    const text = segment.text.trim();
+    const hasQuote = /["“”]/u.test(text);
+    if (hasQuote) {
+      // Removing quoted spans leaves dialogue tags and action beats. Pairing
+      // straight and curly quotes this way is enough to identify candidates;
+      // the repair model handles literary edge cases and malformed source.
+      let insideQuote = false;
+      const outsideQuotes = [...text].filter((char) => {
+        if (char === '"' || char === '“' || char === '”') {
+          insideQuote = !insideQuote;
+          return false;
+        }
+        return !insideQuote;
+      }).join('');
+      if (!hasNarratableText(outsideQuotes)) return [];
+      const isNarrator = segment.speaker.toLowerCase() === 'narrator';
+      return !isNarrator || /\b(?:said|asked|answered|replied|cried|called|shouted|whispered|muttered|snapped|sighed|wailed|shrilled|demanded)\b/iu.test(outsideQuotes)
+        ? [id]
+        : [];
+    }
+
+    if (segment.speaker.toLowerCase() === 'narrator') return [];
+
+    const names = segment.speaker
+      .split(/\s+/)
+      .filter((part) => part.length > 1)
+      .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+    return new RegExp(`^(?:${[...names, 'he', 'she', 'they', 'it'].join('|')})\\b`, 'iu').test(text) ? [id] : [];
+  });
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function splitQuotedDialogueAndNarration(segment: ScriptSegment, dialogueSpeaker: string): ScriptSegment[] {
+
+  const ranges: Array<[number, number]> = [];
+  let opening: number | undefined;
+  let style: 'straight' | 'curly' | undefined;
+  for (let i = 0; i < segment.text.length; i += 1) {
+    const char = segment.text[i];
+    if (char === '"') {
+      if (opening === undefined) {
+        opening = i;
+        style = 'straight';
+      } else if (style === 'straight') {
+        ranges.push([opening, i]);
+        opening = undefined;
+        style = undefined;
+      }
+    } else if (char === '“' && opening === undefined) {
+      opening = i;
+      style = 'curly';
+    } else if (char === '”' && opening !== undefined && style === 'curly') {
+      ranges.push([opening, i]);
+      opening = undefined;
+      style = undefined;
+    }
+  }
+  if (!ranges.length) return [segment];
+
+  const narration = (text: string): ScriptSegment | undefined => {
+    const trimmed = text.trim();
+    return hasNarratableText(trimmed)
+      ? { speaker: 'narrator', text: trimmed, confidence: segment.confidence }
+      : undefined;
+  };
+  const result: ScriptSegment[] = [];
+  let cursor = 0;
+  for (const [start, end] of ranges) {
+    const before = narration(segment.text.slice(cursor, start));
+    if (before) result.push(before);
+    result.push({ ...segment, speaker: dialogueSpeaker, text: segment.text.slice(start, end + 1).trim() });
+    cursor = end + 1;
+  }
+  const after = narration(segment.text.slice(cursor));
+  if (after) result.push(after);
+
+  // Quotes with no narratable surrounding prose are already a valid character
+  // segment, so preserve it rather than needlessly changing its shape.
+  return result.some((part) => part.speaker === 'narrator') ? result : [segment];
+}
+
+/** Split unambiguous quoted character speech from adjacent narrative prose. */
+export function splitCharacterDialogueAndNarration(segment: ScriptSegment): ScriptSegment[] {
+  return segment.speaker.toLowerCase() === 'narrator'
+    ? [segment]
+    : splitQuotedDialogueAndNarration(segment, segment.speaker);
+}
+
+/** Resolve a name in an explicit dialogue tag, including a unique surname. */
+function speakerFromDialogueTag(text: string, characters: PersonProfile[]): string | undefined {
+  const labels = new Map<string, string | undefined>();
+  const add = (label: string, speaker: string) => {
+    const key = label.trim().toLocaleLowerCase();
+    if (!key) return;
+    labels.set(key, labels.has(key) && labels.get(key) !== speaker ? undefined : speaker);
+  };
+  for (const character of characters) {
+    add(character.name, character.name);
+    for (const alias of character.aliases) add(alias, character.name);
+    const parts = character.name.split(/\s+/);
+    if (parts.length > 1) add(parts.at(-1)!, character.name);
+  }
+  const verbs = 'said|asked|answered|replied|cried|called|shouted|whispered|muttered|snapped|sighed|wailed|shrilled|demanded';
+  for (const [label, speaker] of labels) {
+    if (!speaker) continue;
+    const escaped = escapeRegExp(label);
+    if (new RegExp(`\\b(?:${verbs})\\s+(?:the\\s+)?${escaped}\\b|\\b${escaped}\\s+(?:${verbs})\\b`, 'iu').test(text)) return speaker;
+  }
+  return undefined;
+}
+
+/** Recover direct speech when a narrator segment has an explicit dialogue tag. */
+export function splitTaggedNarratorDialogue(segment: ScriptSegment, characters: PersonProfile[]): ScriptSegment[] {
+  if (segment.speaker.toLowerCase() !== 'narrator') return [segment];
+  const speaker = speakerFromDialogueTag(segment.text, characters);
+  return speaker ? splitQuotedDialogueAndNarration(segment, speaker) : [segment];
+}
+
+/**
+ * Correct only suspicious character segments. The model must return an
+ * ordered, verbatim replacement sequence. A malformed replacement is never
+ * allowed to replace source text; it is ignored so the chapter can continue.
+ */
+async function repairNarrationBoundaries(
+  segments: ScriptSegment[],
+  castList: string,
+  characters: PersonProfile[],
+): Promise<ScriptSegment[]> {
+  const candidates = findNarrationAuditCandidates(segments);
+  if (!candidates.length) return segments;
+
+  const entries = candidates
+    .map((id) => `Segment id ${id}, currently labelled ${JSON.stringify(segments[id].speaker)}:\n${JSON.stringify(segments[id].text)}`)
+    .join('\n\n');
+  const result = await jsonCall({
+    model: config.analysisModel,
+    schema: NarrationRepairSchema,
+    system: `You repair narration boundaries in an audiobook script. Respond with JSON: {"repairs":[{"id":number,"segments":[{"speaker","text","delivery"?,"confidence"}]}]}.
+
+For every supplied id, return a complete ordered replacement sequence for that segment.
+- Copy the supplied text verbatim, in the same order. Do not add, remove, rewrite, or summarize words.
+- Character segments contain only that character's direct speech. Keep its quotation marks.
+- Put dialogue tags, actions, thoughts, descriptions, and all other narration in narrator segments.
+- Split interleaved forms such as '"Hello," said Tom. "Goodbye."' into [Tom] "Hello," + [narrator] said Tom. + [Tom] "Goodbye."
+- A supplied segment may already be valid unquoted dialogue; preserve it as one character segment when there is no narration to split.
+- Use only "narrator" or a name from the character list. Mark clear assignments "high" and uncertain ones "low".`,
+    user: `Characters:\n${castList}\n\nRepair these independently:\n${entries}`,
+  });
+
+  const repairs = new Map(result.repairs.map((repair) => [repair.id, repair.segments]));
+  const unexpected = [...repairs.keys()].filter((id) => !candidates.includes(id));
+  const missing = candidates.filter((id) => !repairs.has(id));
+  if (unexpected.length || missing.length || repairs.size !== result.repairs.length) {
+    const problems = [
+      missing.length ? `no repair for segment(s) ${missing.join(', ')}` : '',
+      unexpected.length ? `unexpected segment(s) ${unexpected.join(', ')}` : '',
+      repairs.size !== result.repairs.length ? 'duplicate repair ids' : '',
+    ].filter(Boolean).join('; ');
+    throw new Error(`Narration-boundary audit returned ${problems}. Script was not saved; rerun the script stage.`);
+  }
+
+  const repaired = segments.flatMap((segment, id) => {
+    const replacement = repairs.get(id);
+    if (!replacement) return [segment];
+    if (coverageText(replacement.map((part) => part.text).join(' ')) !== coverageText(segment.text)) {
+      // An audit is advisory. The original attribution has already passed its
+      // schema check, and the deterministic pass below can still separate
+      // obvious quoted dialogue from narration. Do not make a repair model's
+      // spelling/punctuation rewrite lose the entire chapter's progress.
+      reportWarning(`Narration-boundary audit changed text in segment ${id}; ignored that repair and retained the source segment.`);
+      return [segment];
+    }
+    return replacement;
+  });
+  const split = repaired.flatMap((segment) => segment.speaker.toLowerCase() === 'narrator'
+    ? splitTaggedNarratorDialogue(segment, characters)
+    : splitCharacterDialogueAndNarration(segment));
+  const unresolvedNarratorCandidates = findNarrationAuditCandidates(split)
+    .filter((id) => split[id].speaker.toLowerCase() === 'narrator');
+  if (unresolvedNarratorCandidates.length) {
+    throw new Error(`Narration-boundary audit left dialogue in narrator segment(s) ${unresolvedNarratorCandidates.join(', ')}. Script was not saved; rerun the script stage.`);
+  }
+  return split;
+}
 
 /** Remove layout-only segments before they can reach speaker attribution or TTS. */
 export function filterNarratableSegments(segments: ScriptSegment[]): ScriptSegment[] {
@@ -211,7 +419,11 @@ ${tail ? `\nPrevious segments (context):\n${tail}` : ''}
 Text:
 ${block}`,
     });
-    segments.push(...result.segments);
+    const auditCandidates = findNarrationAuditCandidates(result.segments);
+    if (auditCandidates.length) {
+      update({ phase: 'repairing', processedChars, auditedSegments: auditCandidates.length });
+    }
+    segments.push(...await repairNarrationBoundaries(result.segments, castList, characters));
     processedChars += block.length;
   }
 

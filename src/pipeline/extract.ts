@@ -1,31 +1,22 @@
 import fs from 'node:fs';
-import * as cheerio from 'cheerio';
-import { parseEpub } from '../epub/epub.js';
-import { htmlToMarkdown } from '../epub/markdown.js';
 import { countWords } from '../util/text.js';
 import type { WorkDir } from '../state.js';
 import type { BookMetadata, ExtractedChapter } from '../types.js';
 import { reportProgress } from '../util/progress.js';
+import { readSource, type SourceMetadataOverrides } from '../source/read.js';
 
-/** Stage 1: EPUB -> one markdown file per spine chapter + metadata.json + cover. */
-export function runExtract(epubPath: string, work: WorkDir): BookMetadata {
-  reportProgress({ activity: 'Opening EPUB and reading its contents' });
-  const epub = parseEpub(epubPath);
+/** Stage 1: source document -> one markdown file per chapter + metadata.json + cover. */
+export async function runExtract(sourcePath: string, work: WorkDir, overrides?: SourceMetadataOverrides): Promise<BookMetadata> {
+  reportProgress({ activity: 'Opening source document and reading its contents' });
+  const source = await readSource(sourcePath, overrides);
   const chaptersDir = work.dir('chapters');
   fs.rmSync(chaptersDir, { recursive: true, force: true });
   work.dir('chapters');
 
   const chapters: ExtractedChapter[] = [];
-  reportProgress({ activity: 'Extracting chapter text', completedUnits: 0, totalUnits: epub.spine.length, unit: 'chapters extracted' });
-  epub.spine.forEach((item, index) => {
-    const markdown = htmlToMarkdown(item.html);
-
-    let title = epub.tocTitles.get(item.href) ?? '';
-    if (!title) {
-      const $ = cheerio.load(item.html);
-      title = $('h1, h2, h3').first().text().trim();
-    }
-    if (!title) title = `Section ${index + 1}`;
+  reportProgress({ activity: 'Extracting chapter text', completedUnits: 0, totalUnits: source.chapters.length, unit: 'chapters extracted' });
+  source.chapters.forEach((item, index) => {
+    const title = item.title || `Section ${index + 1}`;
 
     const slug =
       title
@@ -34,33 +25,34 @@ export function runExtract(epubPath: string, work: WorkDir): BookMetadata {
         .replace(/^-|-$/g, '')
         .slice(0, 40) || 'section';
     const file = `chapters/${String(index).padStart(2, '0')}-${slug}.md`;
-    fs.writeFileSync(work.path(file), markdown);
+    fs.writeFileSync(work.path(file), item.markdown);
 
     chapters.push({
       index,
       id: item.id,
       title,
       file,
-      words: countWords(markdown),
+      words: countWords(item.markdown),
       isNav: item.isNav,
     });
-    reportProgress({ activity: `Extracted ${title}`, completedUnits: index + 1, totalUnits: epub.spine.length, unit: 'chapters extracted' });
+    reportProgress({ activity: `Extracted ${title}`, completedUnits: index + 1, totalUnits: source.chapters.length, unit: 'chapters extracted' });
   });
 
   let coverFile: string | undefined;
-  if (epub.cover) {
-    coverFile = `cover${epub.cover.ext}`;
-    fs.writeFileSync(work.path(coverFile), epub.cover.data);
+  if (source.cover) {
+    coverFile = `cover${source.cover.ext}`;
+    fs.writeFileSync(work.path(coverFile), source.cover.data);
   }
 
   const metadata: BookMetadata = {
-    title: epub.title,
-    author: epub.author,
-    language: epub.language,
+    title: source.title,
+    author: source.author,
+    language: source.language,
     coverFile,
     chapters,
   };
   work.writeJson('metadata.json', metadata);
+  if (source.contentHash) work.recordDownloadedSourceHash(source.contentHash);
   reportProgress({ activity: 'Chapters, metadata and available cover art saved', phase: 'completed', completedUnits: chapters.length, totalUnits: chapters.length, unit: 'chapters extracted' });
   return metadata;
 }

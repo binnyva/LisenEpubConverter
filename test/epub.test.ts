@@ -92,9 +92,9 @@ describe('parseEpub', () => {
 });
 
 describe('runExtract', () => {
-  it('writes one markdown file per chapter with edge-case rules applied', () => {
+  it('writes one markdown file per chapter with edge-case rules applied', async () => {
     const work = new WorkDir(epubPath, path.join(tmpDir, 'work'));
-    const meta = runExtract(epubPath, work);
+    const meta = await runExtract(epubPath, work);
 
     expect(meta.chapters).toHaveLength(3);
     expect(meta.chapters[1].title).toBe('The Beginning');

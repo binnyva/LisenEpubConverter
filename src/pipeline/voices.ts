@@ -177,10 +177,32 @@ function preferredLanguage(profileLanguage: string, bookLanguage: string | undef
   return languageCode(profileLanguage) ?? languageCode(bookLanguage);
 }
 
-/** Compare BCP 47 primary language subtags: en-US and en both mean English. */
+/**
+ * Compare BCP 47 primary language subtags and the human-readable language
+ * labels that older casts (and LLM output) commonly contain. The catalogue
+ * records BCP 47 codes, while a profile may say "English" or
+ * "American English". Treat those forms equivalently so a language-safe
+ * catalogue voice is not discarded merely because its label differs.
+ */
 function languageCode(language: string | undefined): string | undefined {
-  const normalized = language?.trim().toLowerCase().replace('_', '-');
+  const normalized = language?.trim().toLowerCase().replace(/[ _]+/g, '-');
   if (!normalized || normalized === 'unknown' || normalized === 'unspecified') return undefined;
+  const aliases: Record<string, string> = {
+    'english': 'en',
+    'american-english': 'en',
+    'british-english': 'en',
+    'japanese': 'ja',
+    'mandarin': 'zh',
+    'mandarin-chinese': 'zh',
+    'chinese': 'zh',
+    'spanish': 'es',
+    'french': 'fr',
+    'hindi': 'hi',
+    'italian': 'it',
+    'portuguese': 'pt',
+    'brazilian-portuguese': 'pt',
+  };
+  if (aliases[normalized]) return aliases[normalized];
   return normalized.split('-', 1)[0];
 }
 

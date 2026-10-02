@@ -24,6 +24,7 @@
     "fast-xml-parser": "^5.10.1",
     "openai": "^7.4.0",
     "p-limit": "^7.3.1",
+    "pdfjs-dist": "^6.3.289",
     "turndown": "^7.2.4",
     "zod": "^4.4.3"
   },

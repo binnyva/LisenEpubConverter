@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { STAGES, withLlmRunConfig, type ProviderId, type Stage } from '../config.js';
-import { WorkDir } from '../state.js';
+import { WorkDir, openWorkDir } from '../state.js';
 import type { Analysis, BookMetadata } from '../types.js';
 import { runAnalyze } from './analyze.js';
 import { runAssemble } from './assemble.js';
@@ -16,6 +16,7 @@ import type { VoiceTarget } from '../voices/library.js';
 import { withWarningReporter } from '../util/warnings.js';
 import { withStageProgress, type ChapterProgress, type ActivityProgress } from '../util/progress.js';
 import { throwIfTaskCancelled, withTaskCancellation } from '../util/cancellation.js';
+import { sourceIsAvailable, type SourceMetadataOverrides } from '../source/read.js';
 
 export type ChapterStage = 'chapters' | 'script' | 'synth';
 
@@ -34,10 +35,14 @@ export interface RunStageOptions {
   llmModel?: string;
   voiceTarget?: VoiceTarget;
   voiceLibraryFile?: string;
-  epubPath: string;
+  sourcePath?: string;
+  /** @deprecated Use sourcePath. Kept so existing programmatic callers can migrate safely. */
+  epubPath?: string;
   workRoot: string;
-  outDir: string;
+  /** Optional export directory; defaults to this book's work folder. */
+  outDir?: string;
   stage: Stage;
+  metadataOverrides?: SourceMetadataOverrides;
   chapterIndexes?: number[];
   /** Execute the stage even when its completion record and output already exist. */
   rerun?: boolean;
@@ -57,8 +62,8 @@ export interface RunStageResult {
 
 export interface DiscoveredBook {
   root: string;
-  epubPath: string;
-  epubAvailable: boolean;
+  sourcePath: string;
+  sourceAvailable: boolean;
   completed: Partial<Record<Stage, string>>;
 }
 
@@ -76,12 +81,15 @@ export async function runStage(options: RunStageOptions): Promise<RunStageResult
 }
 
 async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
-  const { epubPath, workRoot, outDir, stage, rebuild, rerun, onEvent } = options;
+  const { workRoot, outDir, stage, rebuild, rerun, onEvent } = options;
+  const sourcePath = options.sourcePath ?? options.epubPath;
   throwIfTaskCancelled();
   if (!STAGES.includes(stage)) throw new Error(`Unknown stage "${stage}".`);
-  if (!fs.existsSync(epubPath)) throw new Error(`EPUB file not found: ${epubPath}`);
+  if (!sourcePath) throw new Error('A source file path is required.');
+  if (!sourceIsAvailable(sourcePath)) throw new Error(`Source file not found: ${sourcePath}`);
 
-  const work = new WorkDir(epubPath, workRoot);
+  const work = await openWorkDir(sourcePath, workRoot, options.metadataOverrides);
+  if (options.metadataOverrides) work.setMetadataOverrides(options.metadataOverrides);
   const chapterIndexes = normalizeChapterIndexes(options.chapterIndexes);
   if (chapterIndexes && stage === 'list-characters') {
     throw new Error('List Characters uses all narratable chapters; omit --chapters.');
@@ -91,7 +99,7 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
     throw new Error('Chapter-specific rebuild is not supported yet. Rebuild the full stage, or run selected chapters to resume them.');
   }
   if (work.sourceChanged() && !(stage === 'extract' && rebuild)) {
-    throw new Error('The selected EPUB differs from the one that produced this work folder. Rebuild Extract before running later stages.');
+    throw new Error('The selected source differs from the one that produced this work folder. Rebuild Extract before running later stages.');
   }
   if (rebuild) {
     work.invalidateFrom(stage);
@@ -124,8 +132,8 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
   let output: string | undefined;
   switch (stage) {
     case 'extract':
-      runExtract(epubPath, work);
-      work.acceptCurrentEpub();
+      await runExtract(sourcePath, work, work.metadataOverrides());
+      work.acceptCurrentSource();
       work.markDone(stage);
       break;
     case 'analyze':
@@ -188,14 +196,16 @@ export function discoverBooks(workRoot: string): DiscoveredBook[] {
       if (!fs.existsSync(statePath)) return [];
       try {
         const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as {
+          source?: string;
           epub?: string;
           completed?: Partial<Record<Stage, string>>;
         };
-        if (!state.epub) return [];
+        const sourcePath = state.source ?? state.epub;
+        if (!sourcePath) return [];
         return [{
           root,
-          epubPath: state.epub,
-          epubAvailable: fs.existsSync(state.epub),
+          sourcePath,
+          sourceAvailable: sourceIsAvailable(sourcePath),
           completed: state.completed ?? {},
         }];
       } catch {
@@ -207,7 +217,7 @@ export function discoverBooks(workRoot: string): DiscoveredBook[] {
 /**
  * Older work folders can contain complete artifacts but an empty manifest after
  * an interrupted run or the pre-UI source-relink behavior. Recover only when
- * the current EPUB is known to match; a changed source must be rebuilt instead.
+ * the current source is known to match; a changed source must be rebuilt instead.
  */
 export function recoverStageStateFromArtifacts(work: WorkDir): boolean {
   if (work.sourceChanged() || Object.keys(work.snapshot().completed).length > 0) return false;

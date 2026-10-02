@@ -125,6 +125,30 @@ describe('voice library bindings', () => {
     expect(bindings.characters.Alice.match.reasons).toContain('Matches en language.');
   });
 
+  it('matches human-readable English casts to the bundled English Kokoro voices', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lisen-kokoro-voices-'));
+    roots.push(root);
+    const epub = path.join(root, 'book.epub');
+    fs.writeFileSync(epub, crypto.randomBytes(32));
+    const work = new WorkDir(epub, root);
+    work.writeJson('casting.json', {
+      version: 2,
+      narrator: { voiceProfile: { presentation: 'female', language: 'English' }, instructions: '' },
+      characters: { Bob: { voiceProfile: { presentation: 'male', language: 'British English' }, instructions: '' } },
+    });
+
+    const bindings = runVoices(
+      work,
+      { provider: 'openrouter', model: 'hexgrad/kokoro-82m' },
+      path.resolve('library/voices.json'),
+    );
+
+    expect(bindings.narrator.voiceId).toMatch(/^(af|bf)_/);
+    expect(bindings.characters.Bob.voiceId).toMatch(/^(am|bm)_/);
+    expect(bindings.narrator.match.reasons).toContain('Matches en language.');
+    expect(bindings.characters.Bob.match.reasons).toContain('Matches en language.');
+  });
+
   it('migrates a legacy model-specific cast before applying library voices', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lisen-legacy-voices-'));
     roots.push(root);

@@ -156,6 +156,23 @@ describe('asynchronous assembly progress', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('saves the default assembled M4B in the book work folder', async () => {
+    const { options, work } = fixture();
+    work.writeJson('audio/00-segments.json', { index: 0, segments: ['cached'] });
+    fs.writeFileSync(work.path('audio/00.m4a'), 'existing encoding');
+    command.mockImplementation(async (bin: string, args: string[]) => {
+      if (bin === 'ffprobe') return { stdout: '1\n', stderr: '' };
+      fs.writeFileSync(args.at(-1)!, 'assembled audio');
+      return { stdout: '', stderr: '' };
+    });
+
+    const { outDir: _outDir, ...defaultOptions } = options;
+    const result = await runStage({ ...defaultOptions, stage: 'assemble' });
+
+    expect(result.output).toBe(work.path('Book.m4b'));
+    expect(fs.existsSync(work.path('Book.m4b'))).toBe(true);
+  });
+
   it('does not publish a failed chapter encode or complete the stage', async () => {
     const { options, work, events } = fixture();
     work.writeJson('audio/00-segments.json', { index: 0, segments: ['paid'] });
