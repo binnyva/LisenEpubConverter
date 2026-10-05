@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { filterNarratableSegments, findNarrationAuditCandidates, splitCharacterDialogueAndNarration, splitLeadingChapterTitle, splitTaggedNarratorDialogue, withChapterTitle } from '../src/pipeline/script.js';
+import { filterNarratableSegments, findNarrationAuditCandidates, splitCharacterDialogueAndNarration, splitDeterministicNarrationBoundaries, splitLeadingChapterTitle, splitTaggedNarratorDialogue, withChapterTitle } from '../src/pipeline/script.js';
 
 describe('filterNarratableSegments', () => {
   it('removes decorative asterisk section dividers', () => {
@@ -95,5 +95,69 @@ describe('findNarrationAuditCandidates', () => {
       { speaker: 'Alexander Adell', text: '"It is amazing,"', confidence: 'high' },
       { speaker: 'narrator', text: 'said Adell. He stirred his drink.', confidence: 'high' },
     ]);
+  });
+
+  it('recognizes an auxiliary dialogue tag without assigning later untagged quotes to the same speaker', () => {
+    expect(splitTaggedNarratorDialogue({
+      speaker: 'narrator',
+      text: '"But how can that be?" Zee Prime had asked.\n\n"Most of it," had been the answer, "is in hyperspace."',
+      confidence: 'high',
+    }, [{
+      name: 'Zee Prime', aliases: [], sex: 'unknown', age: 'unknown', race: 'unknown', class: 'unknown', country: 'unknown', importance: 'main',
+    }])).toEqual([
+      { speaker: 'Zee Prime', text: '"But how can that be?"', confidence: 'high' },
+      { speaker: 'narrator', text: 'Zee Prime had asked.', confidence: 'high' },
+      { speaker: 'narrator', text: '"Most of it,"', confidence: 'high' },
+      { speaker: 'narrator', text: 'had been the answer,', confidence: 'high' },
+      { speaker: 'narrator', text: '"is in hyperspace."', confidence: 'high' },
+    ]);
+  });
+
+  it('splits named dialogue after an unclosed or single-quoted source marker', () => {
+    const characters = [
+      { name: 'Jerrodd', aliases: [], sex: 'unknown', age: 'unknown', race: 'unknown', class: 'unknown', country: 'unknown', importance: 'main' as const },
+      { name: 'Man', aliases: [], sex: 'unknown', age: 'unknown', race: 'unknown', class: 'unknown', country: 'unknown', importance: 'main' as const },
+    ];
+    expect(splitTaggedNarratorDialogue({
+      speaker: 'narrator', text: 'said Jerrodd, with a smile. "It will all stop someday.', confidence: 'low',
+    }, characters)).toEqual([
+      { speaker: 'narrator', text: 'said Jerrodd, with a smile.', confidence: 'high' },
+      { speaker: 'Jerrodd', text: '"It will all stop someday.', confidence: 'high' },
+    ]);
+    expect(splitTaggedNarratorDialogue({
+      speaker: 'narrator', text: 'said Man, \'when data will be sufficient?"', confidence: 'low',
+    }, characters)).toEqual([
+      { speaker: 'narrator', text: 'said Man,', confidence: 'high' },
+      { speaker: 'Man', text: "'when data will be sufficient?\"", confidence: 'high' },
+    ]);
+  });
+
+  it('splits an explicitly named interruption without an LLM repair', () => {
+    const characters = [{
+      name: 'VJ-23X', aliases: [], sex: 'unknown', age: 'unknown', race: 'unknown', class: 'unknown', country: 'unknown', importance: 'main' as const,
+    }];
+    const split = splitDeterministicNarrationBoundaries([{
+      speaker: 'narrator', text: 'VJ-23X interrupted. "We can thank immortality for that."', confidence: 'high',
+    }], characters);
+
+    expect(split).toEqual([
+      { speaker: 'narrator', text: 'VJ-23X interrupted.', confidence: 'high' },
+      { speaker: 'VJ-23X', text: '"We can thank immortality for that."', confidence: 'high' },
+    ]);
+    expect(findNarrationAuditCandidates(split)).toEqual([]);
+  });
+
+  it('assigns a marked pause continuation to the preceding quoted speaker', () => {
+    const split = splitDeterministicNarrationBoundaries([
+      { speaker: 'Jerrodd', text: '"X-23 will be overcrowded."', confidence: 'high' },
+      { speaker: 'narrator', text: 'Then, after a reflective pause, "I tell you, it\'s a lucky thing."', confidence: 'high' },
+    ], []);
+
+    expect(split).toEqual([
+      { speaker: 'Jerrodd', text: '"X-23 will be overcrowded."', confidence: 'high' },
+      { speaker: 'narrator', text: 'Then, after a reflective pause,', confidence: 'high' },
+      { speaker: 'Jerrodd', text: '"I tell you, it\'s a lucky thing."', confidence: 'high' },
+    ]);
+    expect(findNarrationAuditCandidates(split)).toEqual([]);
   });
 });

@@ -29,6 +29,20 @@ const NarrationRepairSchema = z.object({
   })),
 });
 
+// These are verbs that explicitly introduce or follow direct speech. Keeping
+// this list local and intentionally broad lets us handle a large class of
+// unambiguous EPUB prose before asking a model to interpret it.
+const dialogueTagVerbs = [
+  'said', 'asked', 'answered', 'replied', 'cried', 'called', 'shouted',
+  'whispered', 'muttered', 'snapped', 'sighed', 'wailed', 'shrilled',
+  'demanded', 'interrupted', 'interjected', 'continued', 'added', 'put\\s+in',
+  'cut\\s+in', 'broke\\s+in', 'objected', 'agreed', 'admitted', 'conceded',
+  'observed', 'remarked', 'announced', 'exclaimed', 'insisted', 'protested',
+  'suggested', 'declared', 'urged', 'warned', 'pleaded', 'begged', 'retorted',
+].join('|');
+const dialogueTagVerbPhrase = `(?:(?:had|has|have|was|were)\\s+)?(?:${dialogueTagVerbs})`;
+const dialogueTagVerbPattern = new RegExp(`\\b${dialogueTagVerbPhrase}\\b`, 'iu');
+
 /** Compare text coverage while allowing whitespace to move across segment boundaries. */
 function coverageText(text: string): string {
   return normalizeNonBreakingSpaces(text).replace(/\s+/g, ' ').trim();
@@ -58,7 +72,7 @@ export function findNarrationAuditCandidates(segments: ScriptSegment[]): number[
       }).join('');
       if (!hasNarratableText(outsideQuotes)) return [];
       const isNarrator = segment.speaker.toLowerCase() === 'narrator';
-      return !isNarrator || /\b(?:said|asked|answered|replied|cried|called|shouted|whispered|muttered|snapped|sighed|wailed|shrilled|demanded)\b/iu.test(outsideQuotes)
+      return !isNarrator || dialogueTagVerbPattern.test(outsideQuotes)
         ? [id]
         : [];
     }
@@ -77,13 +91,12 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-function splitQuotedDialogueAndNarration(segment: ScriptSegment, dialogueSpeaker: string): ScriptSegment[] {
-
+function quotedRanges(text: string): Array<[number, number]> {
   const ranges: Array<[number, number]> = [];
   let opening: number | undefined;
   let style: 'straight' | 'curly' | undefined;
-  for (let i = 0; i < segment.text.length; i += 1) {
-    const char = segment.text[i];
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
     if (char === '"') {
       if (opening === undefined) {
         opening = i;
@@ -102,6 +115,11 @@ function splitQuotedDialogueAndNarration(segment: ScriptSegment, dialogueSpeaker
       style = undefined;
     }
   }
+  return ranges;
+}
+
+function splitQuotedDialogueAndNarration(segment: ScriptSegment, dialogueSpeaker: string): ScriptSegment[] {
+  const ranges = quotedRanges(segment.text);
   if (!ranges.length) return [segment];
 
   const narration = (text: string): ScriptSegment | undefined => {
@@ -147,20 +165,126 @@ function speakerFromDialogueTag(text: string, characters: PersonProfile[]): stri
     const parts = character.name.split(/\s+/);
     if (parts.length > 1) add(parts.at(-1)!, character.name);
   }
-  const verbs = 'said|asked|answered|replied|cried|called|shouted|whispered|muttered|snapped|sighed|wailed|shrilled|demanded';
   for (const [label, speaker] of labels) {
     if (!speaker) continue;
     const escaped = escapeRegExp(label);
-    if (new RegExp(`\\b(?:${verbs})\\s+(?:the\\s+)?${escaped}\\b|\\b${escaped}\\s+(?:${verbs})\\b`, 'iu').test(text)) return speaker;
+    if (new RegExp(`\\b${dialogueTagVerbPhrase}\\s+(?:the\\s+)?${escaped}\\b|\\b${escaped}\\s+${dialogueTagVerbPhrase}\\b`, 'iu').test(text)) return speaker;
   }
   return undefined;
 }
 
-/** Recover direct speech when a narrator segment has an explicit dialogue tag. */
+/**
+ * Split a named tag followed by a malformed opening quote. Some EPUB sources
+ * lose a closing quote; a named tag before the remaining quote is still enough
+ * to preserve the text and assign its direct speech without guessing.
+ */
+function splitUnclosedTaggedDialogue(segment: ScriptSegment, speaker: string): ScriptSegment[] {
+  // Prefer a word-opening single quote. EPUBs occasionally mix it with a
+  // closing double quote, which would otherwise look like an unclosed pair.
+  const singleQuote = /(?:^|[\s,])'(?=\p{L})/u.exec(segment.text);
+  const straightQuotes = [...segment.text.matchAll(/"/g)].map((match) => match.index!);
+  const opening = singleQuote?.index === undefined
+    ? (straightQuotes.length % 2 === 1 ? straightQuotes.at(-1) : undefined)
+    : singleQuote.index + singleQuote[0].lastIndexOf("'");
+  if (opening === undefined || opening === 0) return [segment];
+
+  const narrationText = segment.text.slice(0, opening).trim();
+  const dialogueText = segment.text.slice(opening).trim();
+  if (!hasNarratableText(narrationText) || !hasNarratableText(dialogueText)) return [segment];
+  return [
+    { speaker: 'narrator', text: narrationText, confidence: 'high' },
+    { ...segment, speaker, text: dialogueText, confidence: 'high' },
+  ];
+}
+
+/** Recover direct speech when its individual quote has an explicit dialogue tag. */
 export function splitTaggedNarratorDialogue(segment: ScriptSegment, characters: PersonProfile[]): ScriptSegment[] {
   if (segment.speaker.toLowerCase() !== 'narrator') return [segment];
-  const speaker = speakerFromDialogueTag(segment.text, characters);
-  return speaker ? splitQuotedDialogueAndNarration(segment, speaker) : [segment];
+  const ranges = quotedRanges(segment.text);
+  if (!ranges.length) {
+    const speaker = speakerFromDialogueTag(segment.text, characters);
+    // A tag-only narrator segment (for example, "asked Lee Prime") is
+    // deterministically narration, even if an earlier audit marked it low.
+    return speaker
+      ? splitUnclosedTaggedDialogue({ ...segment, confidence: 'high' }, speaker)
+      : [segment];
+  }
+
+  const result: ScriptSegment[] = [];
+  let cursor = 0;
+  let foundExplicitSpeaker = false;
+  for (const [index, [start, end]] of ranges.entries()) {
+    const nextStart = ranges[index + 1]?.[0] ?? segment.text.length;
+    const preceding = segment.text.slice(cursor, start);
+    const following = segment.text.slice(end + 1, nextStart);
+    // A completed tag in the previous paragraph belongs to that paragraph's
+    // quote, not to the next quoted passage. This prevents a speaker mention
+    // such as "Zee Prime had asked" from leaking into an untagged recollection.
+    const precedingSpeaker = /\n\s*\n/u.test(preceding) ? undefined : speakerFromDialogueTag(preceding, characters);
+    const speaker = precedingSpeaker ?? speakerFromDialogueTag(following, characters);
+    const narrationText = preceding.trim();
+    if (hasNarratableText(narrationText)) result.push({ speaker: 'narrator', text: narrationText, confidence: segment.confidence });
+    const quote = segment.text.slice(start, end + 1).trim();
+    if (speaker) {
+      foundExplicitSpeaker = true;
+      result.push({ ...segment, speaker, text: quote, confidence: 'high' });
+    } else {
+      result.push({ ...segment, speaker: 'narrator', text: quote, confidence: segment.confidence });
+    }
+    cursor = end + 1;
+  }
+  const tail = segment.text.slice(cursor).trim();
+  if (hasNarratableText(tail)) result.push({ speaker: 'narrator', text: tail, confidence: segment.confidence });
+  return foundExplicitSpeaker ? result : [segment];
+}
+
+/**
+ * A very narrow pattern for a narrator cue followed by a continuation of the
+ * immediately preceding character's speech. This deliberately excludes broad
+ * pronoun and turn-taking guesses: it only accepts a final quote after an
+ * "after … pause/silence/moment" cue and an immediately preceding quoted
+ * character segment.
+ */
+function isMarkedDialogueContinuation(segment: ScriptSegment, previous: ScriptSegment | undefined): previous is ScriptSegment {
+  if (!previous || previous.speaker.toLowerCase() === 'narrator' || segment.speaker.toLowerCase() !== 'narrator') return false;
+  if (!/(?:["”])(?:[.!?…—-]*)$/u.test(previous.text.trim())) return false;
+
+  const match = segment.text.match(/^(.*?)\s*(["“])([\s\S]*)(["”])\s*$/u);
+  if (!match) return false;
+  const cue = match[1].trim();
+  return /^(?:(?:then|and then),?\s+)?after\s+(?:(?:a|an|the)\s+)?(?:[a-z]+\s+){0,3}(?:pause|silence|moment|interval),?$/iu.test(cue);
+}
+
+/**
+ * Separate boundaries that are fully determined by the surrounding text.
+ * This runs before the LLM repair audit, so simple tags and marked speech
+ * continuations never incur a repair call.
+ */
+export function splitDeterministicNarrationBoundaries(
+  segments: ScriptSegment[],
+  characters: PersonProfile[],
+): ScriptSegment[] {
+  const result: ScriptSegment[] = [];
+  for (const segment of segments) {
+    if (segment.speaker.toLowerCase() !== 'narrator') {
+      result.push(...splitCharacterDialogueAndNarration(segment));
+      continue;
+    }
+
+    const tagged = splitTaggedNarratorDialogue(segment, characters);
+    if (tagged.length !== 1 || tagged[0] !== segment) {
+      result.push(...tagged);
+      continue;
+    }
+
+    const previous = result.at(-1);
+    if (isMarkedDialogueContinuation(segment, previous)) {
+      result.push(...splitQuotedDialogueAndNarration(segment, previous.speaker));
+      continue;
+    }
+    result.push(segment);
+  }
+  return result;
 }
 
 /**
@@ -173,11 +297,12 @@ async function repairNarrationBoundaries(
   castList: string,
   characters: PersonProfile[],
 ): Promise<ScriptSegment[]> {
-  const candidates = findNarrationAuditCandidates(segments);
-  if (!candidates.length) return segments;
+  const deterministicallySplit = splitDeterministicNarrationBoundaries(segments, characters);
+  const candidates = findNarrationAuditCandidates(deterministicallySplit);
+  if (!candidates.length) return deterministicallySplit;
 
   const entries = candidates
-    .map((id) => `Segment id ${id}, currently labelled ${JSON.stringify(segments[id].speaker)}:\n${JSON.stringify(segments[id].text)}`)
+    .map((id) => `Segment id ${id}, currently labelled ${JSON.stringify(deterministicallySplit[id].speaker)}:\n${JSON.stringify(deterministicallySplit[id].text)}`)
     .join('\n\n');
   const result = await jsonCall({
     model: config.analysisModel,
@@ -206,7 +331,7 @@ For every supplied id, return a complete ordered replacement sequence for that s
     throw new Error(`Narration-boundary audit returned ${problems}. Script was not saved; rerun the script stage.`);
   }
 
-  const repaired = segments.flatMap((segment, id) => {
+  const repaired = deterministicallySplit.flatMap((segment, id) => {
     const replacement = repairs.get(id);
     if (!replacement) return [segment];
     if (coverageText(replacement.map((part) => part.text).join(' ')) !== coverageText(segment.text)) {
@@ -219,13 +344,16 @@ For every supplied id, return a complete ordered replacement sequence for that s
     }
     return replacement;
   });
-  const split = repaired.flatMap((segment) => segment.speaker.toLowerCase() === 'narrator'
-    ? splitTaggedNarratorDialogue(segment, characters)
-    : splitCharacterDialogueAndNarration(segment));
+  const split = splitDeterministicNarrationBoundaries(repaired, characters);
   const unresolvedNarratorCandidates = findNarrationAuditCandidates(split)
     .filter((id) => split[id].speaker.toLowerCase() === 'narrator');
   if (unresolvedNarratorCandidates.length) {
-    throw new Error(`Narration-boundary audit left dialogue in narrator segment(s) ${unresolvedNarratorCandidates.join(', ')}. Script was not saved; rerun the script stage.`);
+    // A repair that fails coverage validation has already been discarded. Do
+    // not turn that safe preservation of source text into a hard failure: the
+    // user can inspect the retained, low-confidence narrator segments while
+    // the rest of the chapter remains available for review and correction.
+    for (const id of unresolvedNarratorCandidates) split[id].confidence = 'low';
+    reportWarning(`Narration-boundary audit could not split dialogue in narrator segment(s) ${unresolvedNarratorCandidates.join(', ')}; retained the original text as low-confidence narration for review.`);
   }
   return split;
 }
@@ -407,7 +535,124 @@ Rules:
 - "delivery" (optional): a short hint when the text makes it explicit, e.g. "whispering", "shouting", "sobbing".
 - "confidence": "high" when the speaker is clear, "low" when you are guessing.
 - Only use speaker names from the character list; if the speaker is not in the list or unclear, use the name you believe is right with confidence "low".
-- Merge consecutive narrator paragraphs into segments of at most 1500 characters.`,
+- Merge consecutive narrator paragraphs into segments of at most 1500 characters.
+
+Examples:
+
+---
+
+Example 1
+Context: Conversation between Bertram Lupov and Alexander Adell.
+
+Lupov cocked his head sideways. He had a trick of doing that when he wanted to be contrary, and he wanted to be contrary now, partly because he had had to carry the ice and glassware. "Not forever," he said.
+
+"Oh, hell, just about forever. Till the sun runs down, Bert. Ten billion, maybe. Are you satisfied?"
+
+Lupov put his fingers through his thinning hair as though to reassure himself that some was still left and sipped gently at his own drink. "Ten billion years isn't forever."
+
+"Well, it will last our time, won't it?"
+
+---
+
+Output JSON:
+
+{
+  "speaker": "narrator",
+  "text": "Lupov cocked his head sideways. He had a trick of doing that when he wanted to be contrary, and he wanted to be contrary now, partly because he had had to carry the ice and glassware.",
+  "confidence": "high"
+},
+{
+  "speaker": "Bertram Lupov",
+  "text": "\"Not forever,\"",
+  "confidence": "high"
+},
+{
+  "speaker": "narrator",
+  "text": "he said.",
+  "confidence": "high"
+},
+{
+  "speaker": "Alexander Adell",
+  "text": "\"Oh, hell, just about forever. Till the sun runs down, Bert. Ten billion, maybe. Are you satisfied?\"",
+  "confidence": "high"
+},
+{
+  "speaker": "narrator",
+  "text": "Lupov put his fingers through his thinning hair as though to reassure himself that some was still left and sipped gently at his own drink.",
+  "confidence": "high"
+},
+{
+  "speaker": "Bertram Lupov",
+  "text": "\"Ten billion years isn't forever.\"",
+  "confidence": "high"
+},
+{
+  "speaker": "Alexander Adell",
+  "text": "\"Well, it will last our time, won't it?\"",
+  "confidence": "high"
+},
+
+---
+
+Example 2
+Context: Conversation between Jerrodine and Jerrodd...
+
+Jerrodine's eyes were moist as she watched the visiplate. "I can't help it. I feel funny about leaving Earth."
+
+"Why, for Pete's sake?" demanded Jerrodd. "We had nothing there." Then, after a reflective pause, "I tell you, it's a lucky thing the computers worked out interstellar travel the way the race is growing."
+
+"I know, I know," said Jerrodine miserably.
+
+---
+Output JSON for Example 2...
+
+{
+  "speaker": "narrator",
+  "text": "Jerrodine's eyes were moist as she watched the visiplate.",
+  "confidence": "high"
+},
+{
+  "speaker": "Jerrodine",
+  "text": "\"I can't help it. I feel funny about leaving Earth.\"",
+  "confidence": "high"
+},
+{
+  "speaker": "Jerrodd",
+  "text": "\"Why, for Pete's sake?\"",
+  "confidence": "high"
+},
+{
+  "speaker": "narrator",
+  "text": "demanded Jerrodd.",
+  "confidence": "high"
+},
+{
+  "speaker": "Jerrodd",
+  "text": "\"We had nothing there.\"",
+  "confidence": "high"
+},
+{
+  "speaker": "narrator",
+  "text": "Then, after a reflective pause,",
+  "confidence": "high"
+},
+{
+  "speaker": "Jerrodd",
+  "text": "\"I tell you, it's a lucky thing the computers worked out interstellar travel the way the race is growing.\"",
+  "confidence": "high"
+},
+{
+  "speaker": "Jerrodine",
+  "text": "\"I know, I know,\"",
+  "confidence": "high"
+},
+{
+  "speaker": "narrator",
+  "text": "said Jerrodine miserably.",
+  "confidence": "high"
+},
+---
+`,
       user: `Book: "${analysis.summary.slice(0, 400)}"
 Chapter ${index}: "${title}"${blocks.length > 1 ? ` (part ${i + 1} of ${blocks.length})` : ''}
 Chapter summary: ${summaries[index] ?? ''}

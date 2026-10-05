@@ -142,7 +142,7 @@ export const config = {
     return process.env.LISEN_VOICE_LIBRARY_FILE ?? './library/voices.json';
   },
   /** Max characters sent to the LLM per chunk when processing chapter text. */
-  llmChunkChars: 2000, // Was 6000 earlier.
+  llmChunkChars: 6000,
 
   /** Maximum tokens requested for a structured LLM completion. */
   get llmMaxCompletionTokens(): number {

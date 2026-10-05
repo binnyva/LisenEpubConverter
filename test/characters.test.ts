@@ -258,7 +258,7 @@ describe('registry consumers', () => {
     ]);
   });
 
-  it('repairs narration that an attribution response incorrectly included with character dialogue', async () => {
+  it('splits narration that an attribution response incorrectly included with character dialogue without an audit call', async () => {
     const { work } = fixture(1);
     work.writeJson(characterChapterFile(0), chapter(0, [observation('Alexander Adell')]));
     runListCharacters(work);
@@ -274,17 +274,6 @@ describe('registry consumers', () => {
         confidence: 'high',
       }],
     });
-    llm.mockResolvedValueOnce({
-      repairs: [{
-        id: 0,
-        segments: [
-          { speaker: 'Alexander Adell', text: '"It is amazing,"', confidence: 'high' },
-          { speaker: 'narrator', text: 'said Adell. He stirred his drink.', confidence: 'high' },
-          { speaker: 'Alexander Adell', text: '"Forever."', confidence: 'high' },
-        ],
-      }],
-    });
-
     await runScript(work);
 
     expect(work.readJson<any>('script/00.json').segments).toEqual([
@@ -292,7 +281,7 @@ describe('registry consumers', () => {
       { speaker: 'narrator', text: 'said Adell. He stirred his drink.', confidence: 'high' },
       { speaker: 'Alexander Adell', text: '"Forever."', confidence: 'high' },
     ]);
-    expect(llm.mock.calls[1][0].system).toContain('repair narration boundaries');
+    expect(llm).toHaveBeenCalledTimes(1);
   });
 
   it('ignores a narration repair that drops source text and preserves the original segment', async () => {
@@ -314,6 +303,26 @@ describe('registry consumers', () => {
       { speaker: 'Alice', text: '"Hello,"', confidence: 'high' },
       { speaker: 'narrator', text: 'said Alice.', confidence: 'high' },
       { speaker: 'Alice', text: '"Goodbye."', confidence: 'high' },
+    ]);
+  });
+
+  it('saves a low-confidence narrator segment when an invalid repair cannot be recovered', async () => {
+    const { work } = fixture(1);
+    work.writeJson(characterChapterFile(0), chapter(0, [observation('Alice')]));
+    runListCharacters(work);
+    work.writeJson('chapter-summaries.json', { 0: 'Alice speaks.' });
+    fs.writeFileSync(work.dir('chapters-clean') + '/00.md', '"Hello," he said.');
+    llm.mockResolvedValueOnce({
+      segments: [{ speaker: 'narrator', text: '"Hello," he said.', confidence: 'high' }],
+    });
+    llm.mockResolvedValueOnce({
+      repairs: [{ id: 0, segments: [{ speaker: 'Alice', text: '"Hello."', confidence: 'high' }] }],
+    });
+
+    await runScript(work);
+
+    expect(work.readJson<any>('script/00.json').segments).toEqual([
+      { speaker: 'narrator', text: '"Hello," he said.', confidence: 'low' },
     ]);
   });
 
