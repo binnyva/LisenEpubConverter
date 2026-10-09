@@ -39,6 +39,12 @@ function positiveIntFromEnv(name: string, fallback: number): number {
   throw new Error(`Invalid ${name} "${value}". Expected a positive integer.`);
 }
 
+function enumFromEnv<const T extends readonly string[]>(name: string, values: T, fallback: T[number]): T[number] {
+  const value = process.env[name] ?? fallback;
+  if (values.includes(value)) return value as T[number];
+  throw new Error(`Invalid ${name} "${value}". Expected ${values.join(' or ')}.`);
+}
+
 function openRouterMaxPriceFromEnv(): OpenRouterMaxPrice | undefined {
   const value = process.env.LISEN_OPENROUTER_MAX_PRICE;
   if (value === undefined) return undefined;
@@ -96,12 +102,6 @@ export const config = {
     if (selected) return selected;
     return process.env.LISEN_ANALYSIS_MODEL ?? 'gpt-4.1';
   },
-  /** Model for per-chapter bulk work (summaries, cleanup, dialogue attribution). */
-  get chapterModel(): string {
-    const selected = llmRunConfig.getStore()?.model;
-    if (selected) return selected;
-    return process.env.LISEN_CHAPTER_MODEL ?? 'gpt-4.1-mini';
-  },
   /** TTS model. OpenRouter model ids include the provider prefix. */
   get ttsModel(): string {
     return (
@@ -141,9 +141,6 @@ export const config = {
   get voiceLibraryFile(): string {
     return process.env.LISEN_VOICE_LIBRARY_FILE ?? './library/voices.json';
   },
-  /** Max characters sent to the LLM per chunk when processing chapter text. */
-  llmChunkChars: 6000,
-
   /** Maximum tokens requested for a structured LLM completion. */
   get llmMaxCompletionTokens(): number {
     return positiveIntFromEnv('LISEN_LLM_MAX_COMPLETION_TOKENS', 4096);
@@ -172,18 +169,32 @@ export const config = {
   },
   /** Parallel TTS requests. */
   ttsConcurrency: 4,
-  /** Parallel LLM requests for per-chapter work. */
-  llmConcurrency: 3,
+  /** Increment when request-boundary semantics change. */
+  ttsSplitterVersion: 2,
   /** Characters ranked above this many distinct-voice slots share voices via instructions. */
   distinctVoiceSlots: 8,
   /** Audio bitrate for chapter/book AAC encoding. */
   audioBitrate: '96k',
+  /** Conda executable and environment containing the repository's BookNLP dependency. */
+  get condaExecutable(): string {
+    return process.env.LISEN_CONDA_EXECUTABLE ?? '/Users/binnyva/Projects/Tools/MiniConda3/bin/conda';
+  },
+  get booknlpEnvironment(): string {
+    return process.env.LISEN_BOOKNLP_ENV ?? 'booknlp';
+  },
+  get booknlpModel(): 'big' | 'small' {
+    return enumFromEnv('LISEN_BOOKNLP_MODEL', ['big', 'small'] as const, 'big');
+  },
+  get booknlpTimeoutMs(): number {
+    return positiveIntFromEnv('LISEN_BOOKNLP_TIMEOUT_MS', 60 * 60 * 1000);
+  },
 };
 
 export const STAGES = [
   'extract',
   'analyze',
   'chapters',
+  'booknlp',
   'list-characters',
   'script',
   'casting',
@@ -193,3 +204,25 @@ export const STAGES = [
 ] as const;
 
 export type Stage = (typeof STAGES)[number];
+
+export interface StageDefinition {
+  label: string;
+  description: string;
+  scope: 'book' | 'chapter';
+  prerequisites: Stage[];
+  dependency: 'none' | 'llm' | 'booknlp' | 'tts' | 'ffmpeg';
+}
+
+/** Canonical capabilities used by the runner, CLI and UI. */
+export const STAGE_DEFINITIONS: Record<Stage, StageDefinition> = {
+  extract: { label: 'Extract', description: 'Read the source into canonical plain-text chapters, metadata, and cover art.', scope: 'book', prerequisites: [], dependency: 'none' },
+  analyze: { label: 'Analyze', description: 'Analyze the book and prepare reviewable narration choices.', scope: 'book', prerequisites: ['extract'], dependency: 'llm' },
+  chapters: { label: 'Prepare Chapters', description: 'Normalize selected narratable chapters deterministically.', scope: 'chapter', prerequisites: ['analyze'], dependency: 'none' },
+  booknlp: { label: 'BookNLP', description: 'Annotate the complete narratable book with local BookNLP.', scope: 'book', prerequisites: ['chapters'], dependency: 'booknlp' },
+  'list-characters': { label: 'List Characters', description: 'Build the stable speaker registry from BookNLP annotations.', scope: 'book', prerequisites: ['booknlp'], dependency: 'none' },
+  script: { label: 'Script', description: 'Convert exact annotation spans into per-chapter speaker segments.', scope: 'chapter', prerequisites: ['list-characters'], dependency: 'none' },
+  casting: { label: 'Casting', description: 'Design voice profiles for the narrator and attributed speakers.', scope: 'book', prerequisites: ['script'], dependency: 'llm' },
+  voices: { label: 'Voices', description: 'Bind cast profiles to concrete catalogue voices.', scope: 'book', prerequisites: ['casting'], dependency: 'none' },
+  synth: { label: 'Synthesis', description: 'Create or reuse cached speech for the exact current scripts.', scope: 'chapter', prerequisites: ['voices'], dependency: 'tts' },
+  assemble: { label: 'Assemble', description: 'Encode the authoritative chapter plan into an M4B.', scope: 'book', prerequisites: ['synth'], dependency: 'ffmpeg' },
+};

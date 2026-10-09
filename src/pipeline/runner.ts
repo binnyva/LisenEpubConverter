@@ -1,22 +1,25 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { STAGES, withLlmRunConfig, type ProviderId, type Stage } from '../config.js';
+import crypto from 'node:crypto';
+import { config, STAGES, withLlmRunConfig, type ProviderId, type Stage } from '../config.js';
 import { WorkDir, openWorkDir } from '../state.js';
-import type { Analysis, BookMetadata } from '../types.js';
+import { BookAnnotationsSchema, ChapterMapSchema, ChapterScriptSchema, CorrectionsSchema, type Analysis, type BookMetadata } from '../types.js';
 import { runAnalyze } from './analyze.js';
 import { runAssemble } from './assemble.js';
 import { runCasting } from './casting.js';
 import { runChapters } from './chapters.js';
 import { CHARACTER_REGISTRY_FILE, characterChapterFile, characterRegistryHash, readCharacterRegistry, runListCharacters } from './list-characters.js';
 import { runExtract } from './extract.js';
-import { runScript } from './script.js';
+import { runScript, SCRIPT_CONVERTER_VERSION, validateScriptCoverage } from './script.js';
 import { runSynth } from './synth.js';
 import { runVoices } from './voices.js';
+import { BOOKNLP_ADAPTER_VERSION, BOOKNLP_PIPELINE, runBookNlp } from './booknlp.js';
 import type { VoiceTarget } from '../voices/library.js';
 import { withWarningReporter } from '../util/warnings.js';
 import { withStageProgress, type ChapterProgress, type ActivityProgress } from '../util/progress.js';
 import { throwIfTaskCancelled, withTaskCancellation } from '../util/cancellation.js';
 import { sourceIsAvailable, type SourceMetadataOverrides } from '../source/read.js';
+import { acquireWorkspaceLock } from '../util/workspace-lock.js';
 
 export type ChapterStage = 'chapters' | 'script' | 'synth';
 
@@ -89,6 +92,9 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
   if (!sourceIsAvailable(sourcePath)) throw new Error(`Source file not found: ${sourcePath}`);
 
   const work = await openWorkDir(sourcePath, workRoot, options.metadataOverrides);
+  const releaseLock = acquireWorkspaceLock(work.root, `stage:${stage}`);
+  try {
+  migrateLegacyArtifacts(work);
   if (options.metadataOverrides) work.setMetadataOverrides(options.metadataOverrides);
   const chapterIndexes = normalizeChapterIndexes(options.chapterIndexes);
   if (chapterIndexes && stage === 'list-characters') {
@@ -101,6 +107,9 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
   if (work.sourceChanged() && !(stage === 'extract' && rebuild)) {
     throw new Error('The selected source differs from the one that produced this work folder. Rebuild Extract before running later stages.');
   }
+  // Establish that the requested operation is valid before changing completion
+  // state or removing any derived artifact.
+  const selected = await validatePrerequisites(work, stage, chapterIndexes);
   if (rebuild) {
     work.invalidateFrom(stage);
     clearArtifactsFrom(work, stage);
@@ -114,11 +123,6 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
     clearStageOutputForRerun(work, stage, chapterIndexes);
   }
 
-  const selected = await validatePrerequisites(work, stage, chapterIndexes);
-  if (stage === 'chapters' && selected?.some((index) => !fs.existsSync(work.path(characterChapterFile(index))))) {
-    // Legacy chapter output needs discovery only; keep existing cleaned text and audio cache.
-    work.invalidateFrom(work.isDone('chapters') ? 'chapters' : 'list-characters');
-  }
   if (stage === 'synth' && work.isDone('synth') && work.synthesisInputsChanged()) {
     work.invalidateFrom('synth');
     clearArtifactsFrom(work, 'synth');
@@ -143,6 +147,10 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
     case 'chapters':
       await runChapters(work, selected);
       markChapterStage(work, stage, selected);
+      break;
+    case 'booknlp':
+      await runBookNlp(work);
+      work.markDone(stage);
       break;
     case 'list-characters': {
       const previous = fs.existsSync(work.path(CHARACTER_REGISTRY_FILE))
@@ -183,6 +191,28 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
   throwIfTaskCancelled();
   onEvent?.({ type: 'completed', stage, message: output ? `Created ${output}` : `${stage} complete.` });
   return { work, stage, skipped: false, output, chapterIndexes: selected };
+  } finally {
+    releaseLock();
+  }
+}
+
+export function migrateLegacyArtifacts(work: WorkDir): void {
+  const scriptDir = work.path('script');
+  if (!fs.existsSync(scriptDir)) return;
+  const registry = fs.existsSync(work.path('characters.json')) ? readCharacterRegistry(work) : undefined;
+  for (const file of fs.readdirSync(scriptDir).filter((name) => /^\d+\.json$/.test(name))) {
+    const raw = work.readJson<{ index?: number; version?: number; format?: string; segments?: Array<{ speaker?: string; speakerId?: string; [key: string]: unknown }>; [key: string]: unknown }>(`script/${file}`);
+    if (!Number.isInteger(raw.index) || !Array.isArray(raw.segments)) continue;
+    const destination = `script/${String(raw.index).padStart(4, '0')}.json`;
+    const needsMigration = raw.format === undefined || file !== path.basename(destination);
+    if (!needsMigration || (file !== path.basename(destination) && fs.existsSync(work.path(destination)))) continue;
+    const segments = raw.segments.map((segment) => {
+      if (segment.speakerId || segment.speaker === 'narrator') return { ...segment, speakerId: segment.speaker === 'narrator' ? 'narrator' : segment.speakerId };
+      const matches = registry?.characters.filter((character) => character.name === segment.speaker) ?? [];
+      return { ...segment, ...(matches.length === 1 ? { speakerId: matches[0].id } : {}) };
+    });
+    work.writeJson(destination, { ...raw, format: raw.format ?? 'legacy-markdown', segments });
+  }
 }
 
 export function discoverBooks(workRoot: string): DiscoveredBook[] {
@@ -234,19 +264,53 @@ export function recoverStageStateFromArtifacts(work: WorkDir): boolean {
     ? work.readJson<Record<string, string>>('chapter-summaries.json')
     : {};
   const hasCleanOutput = narratable.every((index) =>
-    fs.existsSync(work.path(`chapters-clean/${String(index).padStart(2, '0')}.md`)) && summaries[String(index)] !== undefined &&
-    fs.existsSync(work.path(characterChapterFile(index)))
+    fs.existsSync(work.path(`chapters-clean/${String(index).padStart(4, '0')}.txt`)) && summaries[String(index)] !== undefined
   );
   if (!hasCleanOutput) return changed;
   work.markChaptersDone('chapters', narratable, narratable);
 
+  if (!fs.existsSync(work.path('booknlp/annotations.json')) || !fs.existsSync(work.path('booknlp/chapter-map.json')) || !fs.existsSync(work.path('booknlp/input.txt'))) return changed;
+  const recoveredMap = ChapterMapSchema.safeParse(work.readJson('booknlp/chapter-map.json'));
+  const recoveredAnnotations = BookAnnotationsSchema.safeParse(work.readJson('booknlp/annotations.json'));
+  const recoveredInputHash = crypto.createHash('sha256').update(fs.readFileSync(work.path('booknlp/input.txt'))).digest('hex');
+  if (!recoveredMap.success || !recoveredAnnotations.success || recoveredMap.data.inputSha256 !== recoveredInputHash || recoveredAnnotations.data.source.inputSha256 !== recoveredInputHash || recoveredAnnotations.data.provenance.model !== config.booknlpModel || recoveredAnnotations.data.provenance.adapterVersion !== BOOKNLP_ADAPTER_VERSION) return changed;
+  const recoveredBookNlpFingerprint = crypto.createHash('sha256').update(JSON.stringify({
+    inputSha256: recoveredInputHash,
+    model: config.booknlpModel,
+    pipeline: BOOKNLP_PIPELINE,
+    toolVersion: recoveredAnnotations.data.provenance.toolVersion,
+    adapterVersion: BOOKNLP_ADAPTER_VERSION,
+  })).digest('hex');
+  if (recoveredAnnotations.data.provenance.fingerprint !== recoveredBookNlpFingerprint) return changed;
+  if (!['book.tokens', 'book.quotes', 'book.entities', 'book.book'].every((file) => fs.existsSync(work.path('booknlp/output', file)))) return changed;
+  work.markDone('booknlp');
+
   if (!fs.existsSync(work.path(CHARACTER_REGISTRY_FILE))) return changed;
   work.markDone('list-characters');
 
-  const registryHash = characterRegistryHash(readCharacterRegistry(work));
+  const registry = readCharacterRegistry(work);
+  const registryHash = characterRegistryHash(registry);
+  const corrections = fs.existsSync(work.path('corrections.json'))
+    ? CorrectionsSchema.parse(work.readJson('corrections.json'))
+    : CorrectionsSchema.parse({ version: 1 });
+  const frozenInput = fs.readFileSync(work.path('booknlp/input.txt'), 'utf8');
   const hasScripts = narratable.every((index) => {
-    const file = `script/${String(index).padStart(2, '0')}.json`;
-    return fs.existsSync(work.path(file)) && work.readJson<{ characterRegistryHash?: string }>(file).characterRegistryHash === registryHash;
+    const file = `script/${String(index).padStart(4, '0')}.json`;
+    if (!fs.existsSync(work.path(file))) return false;
+    const script = ChapterScriptSchema.safeParse(work.readJson(file));
+    const mapped = recoveredMap.data.chapters.find((chapter) => chapter.index === index);
+    if (!script.success || !mapped || script.data.characterRegistryHash !== registryHash) return false;
+    const expectedFingerprint = crypto.createHash('sha256').update(JSON.stringify({
+      annotations: recoveredAnnotations.data.provenance.fingerprint,
+      chapterMap: recoveredMap.data,
+      registry,
+      corrections,
+      chapter: index,
+      converter: SCRIPT_CONVERTER_VERSION,
+    })).digest('hex');
+    if (script.data.fingerprint !== expectedFingerprint) return false;
+    try { validateScriptCoverage(script.data, frozenInput, mapped.start, mapped.end); return true; }
+    catch { return false; }
   });
   if (!hasScripts) return changed;
   work.markChaptersDone('script', narratable, narratable);
@@ -257,7 +321,13 @@ export function recoverStageStateFromArtifacts(work: WorkDir): boolean {
   if (!fs.existsSync(work.path('voice-bindings.json'))) return changed;
   work.markDone('voices');
 
-  const hasAudio = narratable.every((index) => fs.existsSync(work.path(`audio/${String(index).padStart(2, '0')}-segments.json`)));
+  const hasAudio = narratable.every((index) => {
+    const file = `audio/${String(index).padStart(4, '0')}-segments.json`;
+    if (!fs.existsSync(work.path(file))) return false;
+    const manifest = work.readJson<{ version?: number; index?: number; fingerprint?: string; scriptFingerprint?: string }>(file);
+    const script = work.readJson<{ fingerprint?: string }>(`script/${String(index).padStart(4, '0')}.json`);
+    return manifest.version === 2 && manifest.index === index && Boolean(manifest.fingerprint) && manifest.scriptFingerprint === script.fingerprint;
+  });
   if (hasAudio) work.markChaptersDone('synth', narratable, narratable);
   return changed;
 }
@@ -265,9 +335,10 @@ export function recoverStageStateFromArtifacts(work: WorkDir): boolean {
 /** Remove derived output only for an explicit rebuild; audio cache is intentionally retained. */
 export function clearArtifactsFrom(work: WorkDir, stage: Stage): void {
   const files: Partial<Record<Stage, string[]>> = {
-    extract: ['chapters', 'metadata.json', 'analysis.json', 'chapters-clean', 'chapter-summaries.json', 'chapter-characters', 'characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
-    analyze: ['analysis.json', 'chapters-clean', 'chapter-summaries.json', 'chapter-characters', 'characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
-    chapters: ['chapters-clean', 'chapter-summaries.json', 'chapter-characters', 'characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
+    extract: ['chapters', 'metadata.json', 'analysis.json', 'chapters-clean', 'chapter-summaries.json', 'chapter-characters', 'booknlp', 'characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
+    analyze: ['analysis.json', 'chapters-clean', 'chapter-summaries.json', 'chapter-characters', 'booknlp', 'characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
+    chapters: ['chapters-clean', 'chapter-summaries.json', 'chapter-characters', 'booknlp', 'characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
+    booknlp: ['booknlp', 'characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
     'list-characters': ['characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
     script: ['character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
     casting: ['casting.json', 'voice-bindings.json', 'audio'],
@@ -290,7 +361,7 @@ function clearStageOutputForRerun(work: WorkDir, stage: Stage, indexes?: number[
       ? work.readJson<Record<string, string>>('chapter-summaries.json')
       : {};
     for (const index of indexes) {
-      fs.rmSync(work.path(`chapters-clean/${String(index).padStart(2, '0')}.md`), { force: true });
+      fs.rmSync(work.path(`chapters-clean/${String(index).padStart(4, '0')}.txt`), { force: true });
       fs.rmSync(work.path(characterChapterFile(index)), { force: true });
       delete summaries[String(index)];
     }
@@ -300,9 +371,15 @@ function clearStageOutputForRerun(work: WorkDir, stage: Stage, indexes?: number[
   if (stage === 'script') {
     if (!indexes) {
       fs.rmSync(work.path('script'), { recursive: true, force: true });
+      clearEncodedAudio(work);
       return;
     }
-    for (const index of indexes) fs.rmSync(work.path(`script/${String(index).padStart(2, '0')}.json`), { force: true });
+    for (const index of indexes) {
+      fs.rmSync(work.path(`script/${String(index).padStart(4, '0')}.json`), { force: true });
+      fs.rmSync(work.path(`audio/${String(index).padStart(4, '0')}-segments.json`), { force: true });
+      fs.rmSync(work.path(`audio/${String(index).padStart(4, '0')}.m4a`), { force: true });
+      fs.rmSync(work.path(`audio/${String(index).padStart(4, '0')}.m4a.json`), { force: true });
+    }
     return;
   }
   if (stage === 'synth') {
@@ -336,9 +413,10 @@ async function validatePrerequisites(
   switch (stage) {
     case 'analyze': requireDone('extract'); break;
     case 'chapters': requireDone('analyze'); break;
-    case 'list-characters': requireDone('chapters'); break;
+    case 'booknlp': requireDone('chapters'); break;
+    case 'list-characters': requireDone('booknlp'); break;
     case 'script':
-      requireDone('analyze');
+      requireDone('booknlp');
       requireDone('list-characters');
       if (!requested) requireDone('chapters');
       break;
@@ -356,6 +434,9 @@ async function validatePrerequisites(
       break;
     case 'assemble':
       if (!requested) requireDone('synth');
+      else if (requested.some((index) => !narratableChapterIndexes(work).includes(index))) {
+        throw new Error('One or more selected chapters are not in the current narration plan.');
+      }
       break;
   }
   if (!CHAPTER_STAGES.has(stage)) return requested;
@@ -365,15 +446,23 @@ async function validatePrerequisites(
   if (selected.some((index) => !available.includes(index))) {
     throw new Error(`One or more selected chapters are not narratable chapters.`);
   }
-  if (stage === 'script') requireFiles(work, selected, 'chapters-clean', '.md', 'Run chapters for the selected chapter first.');
+  if (stage === 'script') requireFiles(work, selected, 'chapters-clean', '.txt', 'Run chapters for the selected chapter first.', 4);
   if (stage === 'synth') requireFiles(work, selected, 'script', '.json', 'Run script for the selected chapter first.');
   return selected;
 }
 
-function requireFiles(work: WorkDir, indexes: number[], dir: string, extension: string, message: string): void {
+function requireFiles(work: WorkDir, indexes: number[], dir: string, extension: string, message: string, width = 4): void {
   for (const index of indexes) {
-    const file = `${dir}/${String(index).padStart(2, '0')}${extension}`;
+    const file = `${dir}/${String(index).padStart(width, '0')}${extension}`;
     if (!fs.existsSync(work.path(file))) throw new Error(message);
+  }
+}
+
+function clearEncodedAudio(work: WorkDir): void {
+  const audio = work.path('audio');
+  if (!fs.existsSync(audio)) return;
+  for (const file of fs.readdirSync(audio)) {
+    if (/^\d+(?:-segments\.json|\.m4a(?:\.json)?)$/.test(file)) fs.rmSync(path.join(audio, file), { force: true });
   }
 }
 
@@ -396,8 +485,7 @@ function markChapterStage(work: WorkDir, stage: ChapterStage, indexes?: number[]
     // complete chapters still count toward the whole-book registry prerequisite.
     const summaries = work.readJson<Record<string, string>>('chapter-summaries.json');
     const complete = all.filter((index) => summaries[String(index)] !== undefined &&
-      fs.existsSync(work.path(`chapters-clean/${String(index).padStart(2, '0')}.md`)) &&
-      fs.existsSync(work.path(characterChapterFile(index))));
+      fs.existsSync(work.path(`chapters-clean/${String(index).padStart(4, '0')}.txt`)));
     work.markChaptersDone(stage, complete, all);
     return;
   }
@@ -405,7 +493,7 @@ function markChapterStage(work: WorkDir, stage: ChapterStage, indexes?: number[]
     // A run can stop at the first unresolved speaker. When that speaker is
     // resolved, earlier script files remain valid and let the next selected
     // run continue from the failed chapter rather than starting over.
-    const complete = all.filter((index) => fs.existsSync(work.path(`script/${String(index).padStart(2, '0')}.json`)));
+    const complete = all.filter((index) => fs.existsSync(work.path(`script/${String(index).padStart(4, '0')}.json`)));
     work.markChaptersDone(stage, complete, all);
     return;
   }

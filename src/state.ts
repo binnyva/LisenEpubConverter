@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { STAGES, type Stage } from './config.js';
+import { config, STAGES, type Stage } from './config.js';
 import { isRemoteSource, readSource, sourceFormatForPath, type SourceFormat, type SourceMetadataOverrides } from './source/read.js';
 
 export interface WorkState {
@@ -207,11 +207,11 @@ export class WorkDir {
 
   writeJson(rel: string, data: unknown): void {
     fs.mkdirSync(path.dirname(this.path(rel)), { recursive: true });
-    fs.writeFileSync(this.path(rel), JSON.stringify(data, null, 2));
+    atomicWriteFile(this.path(rel), JSON.stringify(data, null, 2));
   }
 
   private save(): void {
-    fs.writeFileSync(this.path('state.json'), JSON.stringify(this.state, null, 2));
+    atomicWriteFile(this.path('state.json'), JSON.stringify(this.state, null, 2));
   }
 
   private synthesisInputsHash(): string {
@@ -219,8 +219,21 @@ export class WorkDir {
       const full = this.path(file);
       return fs.existsSync(full) ? fs.readFileSync(full, 'utf8') : '';
     });
+    const scriptDir = this.path('script');
+    if (fs.existsSync(scriptDir)) {
+      for (const file of fs.readdirSync(scriptDir).filter((name) => /^\d+\.json$/.test(name)).sort((a, b) => Number.parseInt(a) - Number.parseInt(b))) {
+        inputs.push(file, fs.readFileSync(path.join(scriptDir, file), 'utf8'));
+      }
+    }
+    inputs.push(JSON.stringify({ ttsMaxChars: config.ttsMaxChars, ttsSplitterVersion: config.ttsSplitterVersion, audioBitrate: config.audioBitrate }));
     return crypto.createHash('sha256').update(inputs.join('\x1f')).digest('hex');
   }
+}
+
+function atomicWriteFile(file: string, data: string | Buffer): void {
+  const pending = `${file}.tmp-${process.pid}-${crypto.randomUUID()}`;
+  fs.writeFileSync(pending, data);
+  fs.renameSync(pending, file);
 }
 
 /**

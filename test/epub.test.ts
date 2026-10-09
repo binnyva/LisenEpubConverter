@@ -92,7 +92,7 @@ describe('parseEpub', () => {
 });
 
 describe('runExtract', () => {
-  it('writes one markdown file per chapter with edge-case rules applied', async () => {
+  it('writes one plain-text file per chapter with edge-case rules applied', async () => {
     const work = new WorkDir(epubPath, path.join(tmpDir, 'work'));
     const meta = await runExtract(epubPath, work);
 
@@ -101,7 +101,8 @@ describe('runExtract', () => {
     expect(meta.coverFile).toBe('cover.jpg');
 
     const ch1 = fs.readFileSync(work.path(meta.chapters[1].file), 'utf8');
-    expect(ch1).toContain('# The Beginning');
+    expect(ch1).toContain('The Beginning');
+    expect(ch1).not.toContain('# The Beginning');
     expect(ch1).toContain('"Hello there," said Alice.');
     expect(ch1).toContain('Image: A hand-drawn map.');
     expect(ch1).toContain('this site');

@@ -31,36 +31,66 @@ export function splitIntoBlocks(text: string, maxChars: number): string[] {
  * boundaries where possible, at word boundaries as a last resort.
  */
 export function splitSentences(text: string, maxChars: number): string[] {
-  if (text.length <= maxChars) return [text];
-  const sentences = text.match(/[^.!?…]+[.!?…]+["'”’]?\s*|[^.!?…]+$/g) ?? [text];
+  if (!Number.isInteger(maxChars) || maxChars < 1) throw new Error('maxChars must be a positive integer.');
+  if (unicodeLength(text) <= maxChars) return [text];
+  const sentences = sentenceSpans(text);
   const pieces: string[] = [];
   let current = '';
   for (const sentence of sentences) {
-    if ((current + sentence).length <= maxChars) {
+    if (unicodeLength(current + sentence) <= maxChars) {
       current += sentence;
       continue;
     }
-    if (current) pieces.push(current.trim());
-    if (sentence.length <= maxChars) {
+    if (current) pieces.push(current);
+    if (unicodeLength(sentence) <= maxChars) {
       current = sentence;
     } else {
-      // Sentence longer than the limit: hard-split at word boundaries.
-      const words = sentence.split(/\s+/);
-      let chunk = '';
-      for (const word of words) {
-        if ((chunk + ' ' + word).length > maxChars && chunk) {
-          pieces.push(chunk.trim());
-          chunk = word;
-        } else {
-          chunk = chunk ? chunk + ' ' + word : word;
-        }
-      }
-      current = chunk;
+      const chunks = splitLongSpan(sentence, maxChars);
+      pieces.push(...chunks.slice(0, -1));
+      current = chunks.at(-1) ?? '';
     }
   }
-  if (current.trim()) pieces.push(current.trim());
+  if (current) pieces.push(current);
   return pieces;
 }
+
+function sentenceSpans(text: string): string[] {
+  const chars = [...text];
+  const spans: string[] = [];
+  let start = 0;
+  for (let i = 0; i < chars.length; i++) {
+    if (!'.!?…'.includes(chars[i])) continue;
+    while (i + 1 < chars.length && '.!?…'.includes(chars[i + 1])) i++;
+    while (i + 1 < chars.length && '"\'”’)]}'.includes(chars[i + 1])) i++;
+    while (i + 1 < chars.length && /\s/u.test(chars[i + 1])) i++;
+    spans.push(chars.slice(start, i + 1).join(''));
+    start = i + 1;
+  }
+  if (start < chars.length) spans.push(chars.slice(start).join(''));
+  return spans.length ? spans : [text];
+}
+
+function splitLongSpan(text: string, maxChars: number): string[] {
+  const chars = [...text];
+  const pieces: string[] = [];
+  let start = 0;
+  while (start < chars.length) {
+    const hardEnd = Math.min(chars.length, start + maxChars);
+    if (hardEnd === chars.length) { pieces.push(chars.slice(start).join('')); break; }
+    let end = hardEnd;
+    for (let i = hardEnd; i > start; i--) {
+      if (/\s/u.test(chars[i - 1])) { end = i; break; }
+    }
+    // A single word can exceed the limit. A code-point boundary is the only
+    // safe hard boundary; never emit an oversized request or split a surrogate.
+    if (end === start) end = hardEnd;
+    pieces.push(chars.slice(start, end).join(''));
+    start = end;
+  }
+  return pieces;
+}
+
+function unicodeLength(text: string): number { return [...text].length; }
 
 export function countWords(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;

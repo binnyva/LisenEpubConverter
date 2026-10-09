@@ -41,4 +41,18 @@ describe('splitSentences', () => {
     const rejoined = pieces.join(' ').replace(/\s+/g, ' ').trim();
     expect(rejoined).toBe(text);
   });
+
+  it('hard-splits one oversized word without breaking Unicode code points', () => {
+    const text = '😀'.repeat(13);
+    const pieces = splitSentences(text, 5);
+    expect(pieces.every((piece) => [...piece].length <= 5)).toBe(true);
+    expect(pieces.join('')).toBe(text);
+  });
+
+  it('does not lose leading ellipses or punctuation', () => {
+    const text = '…Wait! “Really?” Yes.';
+    const pieces = splitSentences(text, 8);
+    expect(pieces.every((piece) => [...piece].length <= 8)).toBe(true);
+    expect(pieces.join('')).toBe(text);
+  });
 });

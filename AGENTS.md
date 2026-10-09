@@ -4,13 +4,14 @@ Guidance for coding agents working on this repo. See [README.md](README.md) for 
 
 ## What this is
 
-A staged, resumable CLI and local web workspace (TypeScript, ESM, Node 22.12+ with current dependencies) that turns an EPUB into a multi-voice M4B audiobook. OpenAI and OpenRouter provide LLM processing and TTS; a shared voice library binds speaker profiles to concrete voices; ffmpeg handles assembly. Fish catalogue bindings are supported, but Fish synthesis is not implemented.
+A staged, resumable CLI and local web workspace (TypeScript, ESM, Node 22.12+) that turns EPUB/PDF/HTML/Markdown/plain text into a multi-voice M4B. Local BookNLP performs whole-book entity/coreference/quotation annotation. OpenAI/OpenRouter LLMs remain for Analyze and Casting; TTS, voice libraries, and ffmpeg retain their provider/assembly architecture.
 
 ## Commands
 
 ```bash
 npm run dev -- convert book.epub --dry-run # prepare through voices; billable LLM calls
 npm run dev -- run book.epub extract      # one offline stage
+npm run dev -- run book.epub booknlp      # whole-book local annotation
 npm run dev -- books --json               # discover work folders
 npm run dev -- status book.epub --json    # source and completion state
 npm run dev -- ui                         # local workspace at 127.0.0.1:3188
@@ -24,7 +25,7 @@ npm run test:watch
 
 Pipeline runs can spend real money on the configured provider APIs, through either the CLI or UI:
 
-- Stages `analyze`, `chapters`, `casting`, and fiction dialogue attribution in `script` make LLM calls.
+- Stages `analyze` and `casting` make LLM calls. `booknlp`, `chapters`, `list-characters`, and `script` are local/offline.
 - Stage `synth` makes TTS calls — **the expensive part**.
 
 Rules of thumb:
@@ -46,7 +47,8 @@ src/
   checks.ts            # CLI checks for ffmpeg/ffprobe and configured API keys
   types.ts             # shared zod schemas / types for pipeline artifacts
   pipeline/
-    runner.ts          # shared orchestration, prerequisites, rebuild/rerun, events, discovery
+    runner.ts          # shared orchestration, locking, prerequisites, rebuild/rerun, events
+    booknlp.ts         # input/map preparation, Conda subprocess, normalized annotations
     *.ts               # extract, analyze, chapters, list-characters, script, casting, voices, synth, assemble
   ui/server.ts         # localhost HTTP API, single active job, embedded HTML/JS workspace
   epub/                # EPUB unzip + OPF parsing (epub.ts), xhtml→markdown (markdown.ts)
@@ -60,6 +62,7 @@ src/
   util/text.ts         # chunking, sentence splitting, narratable-text and whitespace helpers
   util/warnings.ts     # AsyncLocalStorage warning reporter for stage events
 library/voices.json    # bundled version-2 OpenAI/Fish model and voice catalogue
+scripts/booknlp.py     # repository-owned non-installing Python adapter
 test/                  # offline parsing, scripts, providers, voices, state, retry/UI tests
 work/                  # gitignored per-book artifacts; work/alice/ is a sample run to inspect
 0Meta/                 # gitignored background/design notes, when present
@@ -67,7 +70,7 @@ work/                  # gitignored per-book artifacts; work/alice/ is a sample 
 
 ## Architecture in one paragraph
 
-`convert` iterates the nine stages in `STAGES` order (`src/config.ts`): extract → analyze → chapters → list-characters → script → casting → voices → synth → assemble. CLI commands and the UI call `runStage()` in `src/pipeline/runner.ts`, which checks prerequisites, handles invalidation and cleanup, dispatches stage functions, and records completion. Stages read and write `WorkDir` artifacts, with JSON/markdown available for inspection and editing. `casting.json` describes desired speaker profiles; `voice-bindings.json` records the concrete provider/model/native voices used for synthesis. `chapters`, `script`, and `synth` support chapter selection and chapter completion tracking; assembly also accepts chapter selection but only full-book assembly marks the stage complete.
+`convert` iterates ten stages: extract → analyze → chapters → booknlp → list-characters → script → casting → voices → synth → assemble. `STAGE_DEFINITIONS` is the canonical capability/prerequisite metadata. Canonical chapter text is frozen before BookNLP; Python code-point offsets are normalized into versioned annotations; Script slices the frozen input exactly. BookNLP and List Characters are whole-book stages, while Chapters/Script/Synth support chapter completion tracking.
 
 ## Resuming, rerunning, and rebuilding
 
@@ -82,23 +85,25 @@ work/                  # gitignored per-book artifacts; work/alice/ is a sample 
 - **ESM with `.js` suffixes**: imports of local files use `./foo.js` even though sources are `.ts`. Keep this or the compiled output breaks.
 - **All LLM calls go through `jsonCall()`** (`src/providers/llm/openai.ts`): JSON mode, a zod schema for the response, retries with the validation error fed back to the model. Don't call the OpenAI client directly from pipeline code; define/extend zod schemas for any new structured output.
 - **TTS is behind `TTSProvider`** (`src/providers/tts/types.ts`). Synthesis uses the target recorded in bindings, not just current environment defaults. New adapters belong in `src/providers/tts/` and `getTTSProvider()` (`src/providers/tts/openai.ts`); update provider config, key checks, catalogue/binding schemas, and CLI validation as needed.
-- **Adding/reordering a stage** requires updating `STAGES`, runner dispatch/prerequisites/artifact cleanup, and the UI's embedded stage list and descriptions. `convert` already iterates `STAGES`. Stage order controls `invalidateFrom()`, including chapter completion and synthesis input state.
+- **Adding/reordering a stage** requires updating `STAGES`/`STAGE_DEFINITIONS`, runner dispatch/cleanup, and the UI metadata mirror. Stage order controls invalidation.
 - **Stage contract**: read inputs via `work.readJson()` / files under `work.path(...)`, write outputs the same way, and stay idempotent — a stage may be re-run over existing partial output and must skip or overwrite cleanly.
 - Tunables (concurrency, chunk sizes, voice slot count, bitrate) belong in `config.ts`, not inline.
 - Route retry warnings through `reportWarning()` (`src/util/warnings.ts`) so the runner can deliver them to CLI or UI activity events. Keep provider credentials in Node and the UI server bound to `127.0.0.1`.
-- Preserve the script guard that removes layout-only/punctuation-only segments and normalizes non-breaking spaces, including when resuming old scripts. Non-ASCII narration must remain intact.
+- Preserve the layout-only/punctuation-only guard, non-breaking-space normalization, exact-source coverage validation, and Unicode code-point offset handling, including non-BMP characters.
+- `scripts/booknlp.py` must never install/download dependencies. Keep argument-array spawning, process-group cancellation, timeouts, raw outputs, and atomic publication.
+- `corrections.json` and `manual-speaker-settings.json` are persistent user inputs; rebuild cleanup must retain them.
 - Errors from the CLI should be user-actionable (see `checks.ts` for tone); the top-level handler prints `err.message` and exits 1.
 
 ## Testing
 
 `npm test` runs offline Vitest tests covering EPUB/OPF parsing, markdown/text cleanup, script segment filtering, mocked OpenRouter LLM/TTS requests, catalogue parsing and migration, voice matching/manual overrides, source and chapter state, retry warning events, and UI activity rendering. Use these mocks for provider and orchestration regressions; no live API calls are needed for the suite. Run `npm run build` for TypeScript validation. Live output quality can be reviewed with an authorized `--dry-run` and artifact inspection; dry runs do not test TTS. Existing `work/alice/` output, when present, is useful reference material and may use older artifact formats.
 
-## Book characters
+## BookNLP, characters, and scripts
 
-- Analyze produces provisional candidates from samples. Chapters saves evidence-backed speaker observations under `chapter-characters/` while processing full chapter text.
-- `list-characters` (UI: **List Characters**) is an offline, whole-book stage before Script. It requires all narratable chapters and consolidates observations into `characters.json`, merging exact names and unambiguous explicit aliases. Uncertain identities and conflicting traits are retained for review; unnamed roles stay chapter-scoped.
-- Script and Casting use this book-specific registry, separate from the shared voice catalogue. Script saves unresolved speakers in `character-candidates/` and reports an actionable error instead of assigning them to the narrator. Review candidates, update chapter observations, then rerun List Characters and Script.
-- Legacy chapter runs can backfill missing observations with a normal `chapters` run, preserving cleaned text/summaries. Fiction backfill makes LLM calls. Scripts carry a registry hash and regenerate when it changes. A changed registry clears derived audio manifests/encoded chapters, retaining paid MP3 caches and exported books.
+- Source readers create real plain text. Markdown is parsed structurally and PDF preparation preserves paragraph/dialogue boundaries where possible.
+- `booknlp/input.txt` plus `chapter-map.json` freeze the whole-book annotation boundary using half-open Unicode code-point offsets. BookNLP 1.0.8 columns named `byte_onset`/`byte_offset` are actually Python character positions; never treat them as UTF-8 bytes or JS UTF-16 indexes.
+- List Characters includes every attributed entity, not only filtered `.book` entries. Keep duplicate names distinct, pronouns separate from presentation, and reconcile application IDs only when unambiguous.
+- Script is deterministic: quotations are character segments and all gaps/tags/actions are narrator segments. It must pass exact ordered coverage validation. Unresolved/cross-chapter quotes require manual review and block affected synthesis; there is no LLM fallback.
 
 ## Voice library
 
@@ -110,10 +115,11 @@ work/                  # gitignored per-book artifacts; work/alice/ is a sample 
 
 ## Gotchas
 
-- `package.json` still declares Node 20+, but the current Commander dependency requires Node 22.12+. Use a runtime that meets the dependency requirements.
+- The project requires Node 22.12+ because the current Commander dependency does too.
 - `dist/` is gitignored build output; the `lisen` bin points at `dist/cli.js`, so `npm run build` before testing the installed binary.
-- The work-dir slug comes from the EPUB *filename*, not its metadata — renaming the file orphans its work directory.
-- `synth` splits speakable text at sentence boundaries using the adapter's `maxChars` (`LISEN_TTS_MAX_CHARS`, default 4000). Keep the configured margin and account for model-specific limits.
-- `convert` checks ffmpeg/ffprobe and both configured provider keys even with `--dry-run`. `run` checks keys for the requested LLM/TTS stage and ffmpeg/ffprobe only for assembly. The UI invokes the runner directly rather than these CLI startup checks.
-- Keep `LISEN_TTS_PROVIDER` aligned with the saved binding target: CLI key checks use configuration while synthesis uses the bindings. Reapply voices explicitly when changing the book's target model.
+- New work-dir slugs come from source title metadata; existing folders are rediscovered by saved source path or matching local content hash.
+- `synth` splits plain script text at Unicode-safe boundaries, deduplicates in-flight hashes, and retains repeated manifest occurrences. Legacy Markdown scripts use an explicit format path only.
+- Encoded chapters need matching manifest and encoding fingerprints; file existence is never freshness proof. Preserve `audio-cache/` MP3s and prior exports.
+- CLI dependency checks are stage-specific: Analyze/Casting check the selected LLM provider, Synth checks the provider saved in `voice-bindings.json`, and only Assemble checks ffmpeg/ffprobe. Preparation and BookNLP need no API key.
+- Synthesis uses the target saved in bindings rather than `LISEN_TTS_PROVIDER`; reapply voices explicitly when changing the book's target model.
 - `run --json` emits a JSON result but stage code may also print progress/warnings; do not assume its entire stdout is a single JSON document.

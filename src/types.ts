@@ -9,7 +9,7 @@ export interface ExtractedChapter {
   id: string;
   /** Best-effort title from the TOC or first heading. */
   title: string;
-  /** Markdown file path relative to the work dir. */
+  /** Canonical plain-text file path relative to the work dir. */
   file: string;
   words: number;
   /** Structurally detected as a TOC/nav document. */
@@ -79,41 +79,123 @@ export const ChapterCharactersSchema = z.object({
 });
 export type ChapterCharacters = z.infer<typeof ChapterCharactersSchema>;
 
-// ---------- Stage 4: list characters ----------
+// ---------- Stage 4: BookNLP ----------
+
+export const ChapterMapSchema = z.object({
+  version: z.literal(1),
+  offsetConvention: z.literal('unicode-code-points-half-open'),
+  inputSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  chapters: z.array(z.object({
+    index: z.number().int().nonnegative(),
+    title: z.string(),
+    start: z.number().int().nonnegative(),
+    end: z.number().int().nonnegative(),
+    titleInText: z.boolean().default(false),
+  })),
+});
+export type ChapterMap = z.infer<typeof ChapterMapSchema>;
+
+export const AnnotationMentionSchema = z.object({
+  entityId: z.string(),
+  startToken: z.number().int().nonnegative(),
+  endToken: z.number().int().nonnegative(),
+  start: z.number().int().nonnegative(),
+  end: z.number().int().nonnegative(),
+  text: z.string(),
+  kind: z.enum(['proper', 'common', 'pronoun']),
+  category: z.string(),
+});
+
+export const AnnotationQuoteSchema = z.object({
+  id: z.string(),
+  startToken: z.number().int().nonnegative(),
+  endToken: z.number().int().nonnegative(),
+  start: z.number().int().nonnegative(),
+  end: z.number().int().nonnegative(),
+  text: z.string(),
+  chapterIndex: z.number().int().nonnegative().nullable(),
+  entityId: z.string().nullable(),
+  mention: AnnotationMentionSchema.nullable(),
+  assignment: z.enum(['generated', 'unresolved', 'manual']),
+});
+
+export const BookAnnotationsSchema = z.object({
+  version: z.literal(1),
+  source: z.object({
+    inputSha256: z.string(), offsetConvention: z.literal('unicode-code-points-half-open'),
+    sourcePath: z.string().optional(), sourceHash: z.string().optional(),
+  }),
+  provenance: z.object({
+    tool: z.literal('booknlp'),
+    toolVersion: z.string(),
+    model: z.enum(['big', 'small']),
+    pipeline: z.literal('entity,quote,coref'),
+    adapterVersion: z.string(),
+    fingerprint: z.string(),
+  }),
+  mentions: z.array(AnnotationMentionSchema),
+  quotations: z.array(AnnotationQuoteSchema),
+});
+export type BookAnnotations = z.infer<typeof BookAnnotationsSchema>;
+
+export const CorrectionsSchema = z.object({
+  version: z.literal(1),
+  characters: z.record(z.string(), z.object({
+    name: z.string().optional(), aliases: z.array(z.string()).optional(),
+    age: z.string().optional(), race: z.string().optional(), class: z.string().optional(), country: z.string().optional(),
+    presentation: z.enum(['male', 'female', 'neutral', 'unknown']).optional(),
+    mergeInto: z.string().optional(),
+  })).default({}),
+  quotationSpeakers: z.record(z.string(), z.string()).default({}),
+});
+export type Corrections = z.infer<typeof CorrectionsSchema>;
+
+// ---------- Stage 5: list characters ----------
 
 export const CharacterRegistrySchema = z.object({
-  version: z.literal(1),
+  version: z.union([z.literal(1), z.literal(2)]),
   chapters: z.array(z.number().int().nonnegative()),
   characters: z.array(PersonProfileSchema.extend({
     id: z.string(),
     chapters: z.array(z.number().int().nonnegative()),
     evidence: z.array(z.object({ chapter: z.number(), chunk: z.number(), text: z.string() })),
     issues: z.array(z.string()),
+    sourceEntityIds: z.array(z.string()).default([]),
+    sourceQuoteIds: z.array(z.string()).default([]),
+    inferredPronouns: z.array(z.string()).default([]),
   })),
 });
 export type CharacterRegistry = z.infer<typeof CharacterRegistrySchema>;
 
-// ---------- Stage 5: script ----------
+// ---------- Stage 6: script ----------
 
 export const ScriptSegmentSchema = z.object({
   /** 'narrator' or a canonical name from the book's character registry. */
   speaker: z.string(),
+  /** Stable application identity. Names are only display labels. */
+  speakerId: z.string().optional(),
   /** Verbatim text to be spoken. */
   text: z.string(),
   /** Optional delivery hint for TTS instructions, e.g. "whispering". */
   delivery: z.string().optional(),
   confidence: z.enum(['high', 'low']).default('high'),
+  sourceStart: z.number().int().nonnegative().optional(),
+  sourceEnd: z.number().int().nonnegative().optional(),
+  quotationId: z.string().optional(),
 });
 export type ScriptSegment = z.infer<typeof ScriptSegmentSchema>;
 
 export const ChapterScriptSchema = z.object({
   index: z.number(),
+  version: z.literal(2).optional(),
+  format: z.enum(['plain-text', 'legacy-markdown']).optional(),
   characterRegistryHash: z.string().optional(),
+  fingerprint: z.string().optional(),
   segments: z.array(ScriptSegmentSchema),
 });
 export type ChapterScript = z.infer<typeof ChapterScriptSchema>;
 
-// ---------- Stage 6: casting ----------
+// ---------- Stage 7: casting ----------
 
 export const VoiceProfileSchema = z.object({
   /** Desired presentation. This describes the character, not a provider voice. */
@@ -140,7 +222,7 @@ export const CastingSchema = z.object({
 });
 export type Casting = z.infer<typeof CastingSchema>;
 
-// ---------- Stage 7: voice bindings ----------
+// ---------- Stage 8: voice bindings ----------
 
 export const VoiceBindingSchema = z.object({
   libraryVoiceId: z.string(),
@@ -168,10 +250,21 @@ export const VoiceBindingsSchema = z.object({
 });
 export type VoiceBindings = z.infer<typeof VoiceBindingsSchema>;
 
-// ---------- Stage 8: synth ----------
+export const ManualSpeakerSettingsSchema = z.object({
+  version: z.literal(1),
+  instructions: z.record(z.string(), z.string()).default({}),
+  voiceBindings: z.record(z.string(), VoiceBindingSchema).default({}),
+});
+export type ManualSpeakerSettings = z.infer<typeof ManualSpeakerSettingsSchema>;
+
+// ---------- Stage 9: synth ----------
 
 export interface ChapterAudioManifest {
+  version?: 2;
   index: number;
   /** Ordered audio-cache hashes making up the chapter. */
   segments: string[];
+  scriptFingerprint?: string;
+  fingerprint?: string;
+  encoding?: { codec: 'aac'; bitrate: string; sampleRate: number; channels: number };
 }

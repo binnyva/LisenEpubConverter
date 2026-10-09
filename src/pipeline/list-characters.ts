@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
-import { CharacterRegistrySchema, ChapterCharactersSchema, type Analysis, type BookMetadata, type CharacterRegistry, type ChapterCharacters } from '../types.js';
+import { BookAnnotationsSchema, CharacterRegistrySchema, CorrectionsSchema, type BookAnnotations, type CharacterRegistry, type ChapterCharacters, type Corrections } from '../types.js';
 import type { WorkDir } from '../state.js';
 import { reportWarning } from '../util/warnings.js';
 import { reportProgress } from '../util/progress.js';
@@ -87,6 +87,9 @@ export function buildCharacterRegistry(chapters: ChapterCharacters[]): Character
       chapters: [...new Set(observations.map((o) => o.chapter))].sort((a, b) => a - b),
       evidence: observations.map((o) => ({ chapter: o.chapter, chunk: o.chunk, text: o.evidence })),
       issues: [...issues],
+      sourceEntityIds: [],
+      sourceQuoteIds: [],
+      inferredPronouns: [],
     };
     return character;
   });
@@ -110,39 +113,115 @@ export function buildCharacterRegistry(chapters: ChapterCharacters[]): Character
 }
 
 export function runListCharacters(work: WorkDir): CharacterRegistry {
-  const analysis = work.readJson<Analysis>('analysis.json');
-  const metadata = work.readJson<BookMetadata>('metadata.json');
-  const chapters = metadata.chapters.filter((ch) => analysis.chapters.some((p) => p.index === ch.index && p.narrate));
-  reportProgress({ activity: 'Reading chapter character observations', completedUnits: 0, totalUnits: chapters.length, unit: 'chapters read' });
-  const observations = chapters.map((chapter, position) => {
-    const file = characterChapterFile(chapter.index);
-    if (!fs.existsSync(work.path(file))) {
-      throw new Error(`Character observations are missing for chapter ${chapter.index + 1}. Run chapters to backfill them, then run list-characters.`);
-    }
-    const result = ChapterCharactersSchema.parse(work.readJson(file));
-    if (result.index !== chapter.index) throw new Error(`Chapter index mismatch in ${file}. Rerun chapters for index ${chapter.index}.`);
-    reportProgress({ activity: 'Reading chapter character observations', completedUnits: position + 1, totalUnits: chapters.length, unit: 'chapters read' });
-    return result;
-  });
-  reportProgress({ activity: 'Merging supported names and aliases into the book character registry' });
-  const registry = buildCharacterRegistry(observations);
-  if (fs.existsSync(work.path(CHARACTER_REGISTRY_FILE))) {
-    const previous = readCharacterRegistry(work);
-    const used = new Set<string>();
-    for (const character of registry.characters) {
-      const names = new Set([character.name, ...character.aliases].map(key));
-      const matches = previous.characters.filter((old) => !used.has(old.id) && [old.name, ...old.aliases].some((name) => names.has(key(name))));
-      const oldNames = matches.length === 1 ? new Set([matches[0].name, ...matches[0].aliases].map(key)) : new Set<string>();
-      const successors = registry.characters.filter((next) => [next.name, ...next.aliases].some((name) => oldNames.has(key(name))));
-      if (matches.length === 1 && successors.length === 1) {
-        character.id = matches[0].id;
-        used.add(character.id);
-      }
-    }
-  }
+  reportProgress({ activity: 'Reading BookNLP entities and attributed quotations' });
+  const annotations = BookAnnotationsSchema.parse(work.readJson('booknlp/annotations.json'));
+  const corrections = fs.existsSync(work.path('corrections.json'))
+    ? CorrectionsSchema.parse(work.readJson('corrections.json'))
+    : CorrectionsSchema.parse({ version: 1 });
+  const previous = fs.existsSync(work.path(CHARACTER_REGISTRY_FILE)) ? readCharacterRegistry(work) : undefined;
+  const registry = registryFromAnnotations(annotations, previous, corrections);
   work.writeJson(CHARACTER_REGISTRY_FILE, registry);
   const review = registry.characters.filter((character) => character.issues.length);
   if (review.length) reportWarning(`${review.length} character profile(s) need review in characters.json: ${review.map((c) => c.name).join(', ')}.`);
   reportProgress({ activity: `Saved ${registry.characters.length} character profiles; ${review.length} need review`, phase: 'completed' });
   return registry;
+}
+
+export function registryFromAnnotations(
+  annotations: BookAnnotations,
+  previous?: CharacterRegistry,
+  corrections: Corrections = CorrectionsSchema.parse({ version: 1 }),
+): CharacterRegistry {
+  const quotesByEntity = new Map<string, BookAnnotations['quotations']>();
+  for (const quote of annotations.quotations) {
+    // BookNLP reserves entity 0 for first-person narration. It uses Lisen's
+    // narrator voice and is not a separately cast character.
+    if (!quote.entityId || quote.entityId === 'booknlp:0') continue;
+    const list = quotesByEntity.get(quote.entityId) ?? [];
+    list.push(quote);
+    quotesByEntity.set(quote.entityId, list);
+  }
+  const mentionsByEntity = new Map<string, BookAnnotations['mentions']>();
+  for (const mention of annotations.mentions) {
+    const list = mentionsByEntity.get(mention.entityId) ?? [];
+    list.push(mention);
+    mentionsByEntity.set(mention.entityId, list);
+  }
+
+  const candidates = [...quotesByEntity.entries()].map(([entityId, quotes], position) => {
+    const mentions = mentionsByEntity.get(entityId) ?? [];
+    const proper = rankedLabels(mentions.filter((mention) => mention.kind === 'proper').map((mention) => mention.text));
+    const common = rankedLabels(mentions.filter((mention) => mention.kind === 'common').map((mention) => mention.text));
+    const pronouns = rankedLabels(mentions.filter((mention) => mention.kind === 'pronoun').map((mention) => mention.text));
+    const labels = [...proper, ...common];
+    const name = labels[0] ?? `Unnamed speaker ${position + 1}`;
+    const aliases = labels.slice(1).filter((label) => key(label) !== key(name));
+    const quoteIds = quotes.map((quote) => quote.id);
+    const chapters = [...new Set(quotes.flatMap((quote) => quote.chapterIndex === null ? [] : [quote.chapterIndex]))].sort((a, b) => a - b);
+    return {
+      id: '', name, aliases, sex: 'unknown' as 'male' | 'female' | 'unknown', age: 'unknown', race: 'unknown', class: 'unknown', country: 'unknown',
+      importance: quotes.length >= 20 ? 'main' as const : quotes.length >= 5 ? 'secondary' as const : 'minor' as const,
+      chapters,
+      evidence: quotes.slice(0, 5).map((quote) => ({ chapter: quote.chapterIndex ?? 0, chunk: 0, text: quote.text })),
+      issues: [] as string[], sourceEntityIds: [entityId], sourceQuoteIds: quoteIds, inferredPronouns: pronouns,
+    };
+  });
+
+  const usedPrevious = new Set<string>();
+  for (const candidate of candidates) {
+    const matches = previous?.characters.filter((old) => !usedPrevious.has(old.id) && reconciliationScore(candidate, old) > 0) ?? [];
+    const ranked = matches.map((old) => ({ old, score: reconciliationScore(candidate, old) })).sort((a, b) => b.score - a.score);
+    if (ranked[0] && (!ranked[1] || ranked[0].score > ranked[1].score)) {
+      candidate.id = ranked[0].old.id;
+      usedPrevious.add(candidate.id);
+    } else {
+      candidate.id = `speaker-${crypto.createHash('sha256').update(`${candidate.name}\x1f${candidate.sourceQuoteIds[0] ?? candidate.sourceEntityIds[0]}`).digest('hex').slice(0, 16)}`;
+      if (ranked.length > 1) candidate.issues.push('Ambiguous reconciliation with the previous character registry; manual corrections were not guessed.');
+    }
+    const correction = corrections.characters[candidate.id];
+    if (correction) {
+      if (correction.name) candidate.name = correction.name;
+      if (correction.aliases) candidate.aliases = [...correction.aliases];
+      if (correction.presentation === 'male' || correction.presentation === 'female') candidate.sex = correction.presentation;
+      for (const field of ['age', 'race', 'class', 'country'] as const) if (correction[field]) candidate[field] = correction[field]!;
+    }
+  }
+
+  for (const character of candidates) {
+    const mergeInto = corrections.characters[character.id]?.mergeInto;
+    if (!mergeInto) continue;
+    const target = candidates.find((entry) => entry.id === mergeInto);
+    if (!target) character.issues.push(`Correction requests merge into missing speaker ${mergeInto}.`);
+    else {
+      target.aliases = [...new Set([...target.aliases, character.name, ...character.aliases])];
+      target.sourceEntityIds.push(...character.sourceEntityIds);
+      target.sourceQuoteIds.push(...character.sourceQuoteIds);
+      target.chapters = [...new Set([...target.chapters, ...character.chapters])].sort((a, b) => a - b);
+      character.issues.push(`Merged into ${target.name}; retained as a review record until split/merge editing is finalized.`);
+    }
+  }
+  return CharacterRegistrySchema.parse({
+    version: 2,
+    chapters: [...new Set(annotations.quotations.flatMap((quote) => quote.chapterIndex === null ? [] : [quote.chapterIndex]))].sort((a, b) => a - b),
+    characters: candidates,
+  });
+}
+
+function rankedLabels(labels: string[]): string[] {
+  const counts = new Map<string, { label: string; count: number }>();
+  for (const label of labels.map((value) => value.trim()).filter(Boolean)) {
+    const normalized = key(label);
+    const entry = counts.get(normalized) ?? { label, count: 0 };
+    entry.count++;
+    if (label.length > entry.label.length) entry.label = label;
+    counts.set(normalized, entry);
+  }
+  return [...counts.values()].sort((a, b) => b.count - a.count || b.label.length - a.label.length).map((entry) => entry.label);
+}
+
+function reconciliationScore(candidate: CharacterRegistry['characters'][number], old: CharacterRegistry['characters'][number]): number {
+  const quoteOverlap = candidate.sourceQuoteIds.filter((id) => old.sourceQuoteIds.includes(id)).length;
+  const names = new Set([candidate.name, ...candidate.aliases].map(key));
+  const nameOverlap = [old.name, ...old.aliases].filter((name) => names.has(key(name))).length;
+  return quoteOverlap * 100 + nameOverlap;
 }

@@ -1,37 +1,30 @@
 import fs from 'node:fs';
-import { z } from 'zod';
-import { jsonCall } from '../providers/llm/openai.js';
-import { config } from '../config.js';
+import crypto from 'node:crypto';
 import { markdownToSpeakable } from '../epub/markdown.js';
-import { hasNarratableText, normalizeNonBreakingSpaces, splitIntoBlocks } from '../util/text.js';
-import { reportWarning } from '../util/warnings.js';
+import { hasNarratableText, normalizeNonBreakingSpaces } from '../util/text.js';
 import type { WorkDir } from '../state.js';
 import { characterRegistryHash, readCharacterRegistry } from './list-characters.js';
-import { withChapterProgress, type ChapterProgress, type ProgressReporter } from '../util/progress.js';
+import { withChapterProgress, type ProgressReporter } from '../util/progress.js';
 import {
-  ScriptSegmentSchema,
+  BookAnnotationsSchema,
+  ChapterMapSchema,
+  ChapterScriptSchema,
+  CorrectionsSchema,
   type Analysis,
+  type BookAnnotations,
   type BookMetadata,
+  type CharacterRegistry,
+  type ChapterMap,
   type ChapterScript,
-  type ChapterSummaries,
+  type Corrections,
   type ScriptSegment,
   type PersonProfile,
 } from '../types.js';
 
-const SegmentsSchema = z.object({ segments: z.array(ScriptSegmentSchema) });
-const VerifySchema = z.object({
-  attributions: z.array(z.object({ id: z.number(), speaker: z.string() })),
-});
-const NarrationRepairSchema = z.object({
-  repairs: z.array(z.object({
-    id: z.number().int().nonnegative(),
-    segments: z.array(ScriptSegmentSchema).min(1),
-  })),
-});
+export const SCRIPT_CONVERTER_VERSION = '1';
 
-// These are verbs that explicitly introduce or follow direct speech. Keeping
-// this list local and intentionally broad lets us handle a large class of
-// unambiguous EPUB prose before asking a model to interpret it.
+// Legacy-script compatibility helpers use these explicit speech verbs when
+// separating already-generated dialogue from surrounding narration.
 const dialogueTagVerbs = [
   'said', 'asked', 'answered', 'replied', 'cried', 'called', 'shouted',
   'whispered', 'muttered', 'snapped', 'sighed', 'wailed', 'shrilled',
@@ -42,11 +35,6 @@ const dialogueTagVerbs = [
 ].join('|');
 const dialogueTagVerbPhrase = `(?:(?:had|has|have|was|were)\\s+)?(?:${dialogueTagVerbs})`;
 const dialogueTagVerbPattern = new RegExp(`\\b${dialogueTagVerbPhrase}\\b`, 'iu');
-
-/** Compare text coverage while allowing whitespace to move across segment boundaries. */
-function coverageText(text: string): string {
-  return normalizeNonBreakingSpaces(text).replace(/\s+/g, ' ').trim();
-}
 
 /**
  * Find character-labelled segments which probably include narration. This is
@@ -287,77 +275,6 @@ export function splitDeterministicNarrationBoundaries(
   return result;
 }
 
-/**
- * Correct only suspicious character segments. The model must return an
- * ordered, verbatim replacement sequence. A malformed replacement is never
- * allowed to replace source text; it is ignored so the chapter can continue.
- */
-async function repairNarrationBoundaries(
-  segments: ScriptSegment[],
-  castList: string,
-  characters: PersonProfile[],
-): Promise<ScriptSegment[]> {
-  const deterministicallySplit = splitDeterministicNarrationBoundaries(segments, characters);
-  const candidates = findNarrationAuditCandidates(deterministicallySplit);
-  if (!candidates.length) return deterministicallySplit;
-
-  const entries = candidates
-    .map((id) => `Segment id ${id}, currently labelled ${JSON.stringify(deterministicallySplit[id].speaker)}:\n${JSON.stringify(deterministicallySplit[id].text)}`)
-    .join('\n\n');
-  const result = await jsonCall({
-    model: config.analysisModel,
-    schema: NarrationRepairSchema,
-    system: `You repair narration boundaries in an audiobook script. Respond with JSON: {"repairs":[{"id":number,"segments":[{"speaker","text","delivery"?,"confidence"}]}]}.
-
-For every supplied id, return a complete ordered replacement sequence for that segment.
-- Copy the supplied text verbatim, in the same order. Do not add, remove, rewrite, or summarize words.
-- Character segments contain only that character's direct speech. Keep its quotation marks.
-- Put dialogue tags, actions, thoughts, descriptions, and all other narration in narrator segments.
-- Split interleaved forms such as '"Hello," said Tom. "Goodbye."' into [Tom] "Hello," + [narrator] said Tom. + [Tom] "Goodbye."
-- A supplied segment may already be valid unquoted dialogue; preserve it as one character segment when there is no narration to split.
-- Use only "narrator" or a name from the character list. Mark clear assignments "high" and uncertain ones "low".`,
-    user: `Characters:\n${castList}\n\nRepair these independently:\n${entries}`,
-  });
-
-  const repairs = new Map(result.repairs.map((repair) => [repair.id, repair.segments]));
-  const unexpected = [...repairs.keys()].filter((id) => !candidates.includes(id));
-  const missing = candidates.filter((id) => !repairs.has(id));
-  if (unexpected.length || missing.length || repairs.size !== result.repairs.length) {
-    const problems = [
-      missing.length ? `no repair for segment(s) ${missing.join(', ')}` : '',
-      unexpected.length ? `unexpected segment(s) ${unexpected.join(', ')}` : '',
-      repairs.size !== result.repairs.length ? 'duplicate repair ids' : '',
-    ].filter(Boolean).join('; ');
-    throw new Error(`Narration-boundary audit returned ${problems}. Script was not saved; rerun the script stage.`);
-  }
-
-  const repaired = deterministicallySplit.flatMap((segment, id) => {
-    const replacement = repairs.get(id);
-    if (!replacement) return [segment];
-    if (coverageText(replacement.map((part) => part.text).join(' ')) !== coverageText(segment.text)) {
-      // An audit is advisory. The original attribution has already passed its
-      // schema check, and the deterministic pass below can still separate
-      // obvious quoted dialogue from narration. Do not make a repair model's
-      // spelling/punctuation rewrite lose the entire chapter's progress.
-      reportWarning(`Narration-boundary audit changed text in segment ${id}; ignored that repair and retained the source segment.`);
-      return [segment];
-    }
-    return replacement;
-  });
-  const split = splitDeterministicNarrationBoundaries(repaired, characters);
-  const unresolvedNarratorCandidates = findNarrationAuditCandidates(split)
-    .filter((id) => split[id].speaker.toLowerCase() === 'narrator');
-  if (unresolvedNarratorCandidates.length) {
-    // A repair that fails coverage validation has already been discarded. Do
-    // not turn that safe preservation of source text into a hard failure: the
-    // user can inspect the retained, low-confidence narrator segments while
-    // the rest of the chapter remains available for review and correction.
-    for (const id of unresolvedNarratorCandidates) split[id].confidence = 'low';
-    reportWarning(`Narration-boundary audit could not split dialogue in narrator segment(s) ${unresolvedNarratorCandidates.join(', ')}; retained the original text as low-confidence narration for review.`);
-  }
-  return split;
-}
-
 /** Remove layout-only segments before they can reach speaker attribution or TTS. */
 export function filterNarratableSegments(segments: ScriptSegment[]): ScriptSegment[] {
   return segments
@@ -412,10 +329,8 @@ export function withChapterTitle(segments: ScriptSegment[], title?: string): Scr
 }
 
 /**
- * Stage 5: turn each cleaned chapter into an ordered script of
- * {speaker, text, delivery} segments. Fiction goes through LLM dialogue
- * attribution plus a verification pass on low-confidence segments;
- * non-fiction is entirely the narrator.
+ * Stage 6: deterministically convert exact annotation spans into ordered
+ * speaker segments, preserving complete source coverage.
  */
 export async function runScript(
   work: WorkDir,
@@ -426,19 +341,17 @@ export async function runScript(
   const analysis = work.readJson<Analysis>('analysis.json');
   const registry = readCharacterRegistry(work);
   const registryHash = characterRegistryHash(registry);
-  const summaries = work.readJson<ChapterSummaries>('chapter-summaries.json');
+  const annotations = BookAnnotationsSchema.parse(work.readJson('booknlp/annotations.json'));
+  const chapterMap = ChapterMapSchema.parse(work.readJson('booknlp/chapter-map.json'));
+  const corrections = fs.existsSync(work.path('corrections.json'))
+    ? CorrectionsSchema.parse(work.readJson('corrections.json'))
+    : CorrectionsSchema.parse({ version: 1 });
+  const input = fs.readFileSync(work.path('booknlp/input.txt'), 'utf8');
   work.dir('script');
 
   const narratable = meta.chapters
     .filter((ch) => analysis.chapters.find((p) => p.index === ch.index)?.narrate)
     .filter((ch) => !chapterIndexes || chapterIndexes.includes(ch.index));
-
-  // Canonical-name lookup, including aliases, case-insensitive.
-  const canonical = new Map<string, string>();
-  for (const c of registry.characters) {
-    canonical.set(c.name.toLowerCase(), c.name);
-    for (const a of c.aliases) canonical.set(a.toLowerCase(), c.name);
-  }
 
   for (const [chapterPosition, ch] of narratable.entries()) {
     await withChapterProgress({
@@ -446,274 +359,96 @@ export async function runScript(
       completedChapters: chapterPosition, totalChapters: narratable.length,
       phase: 'preparing', processedChars: 0, totalChars: 0,
     }, report, async (update) => {
-      const scriptFile = `script/${String(ch.index).padStart(2, '0')}.json`;
+      const mapped = chapterMap.chapters.find((entry) => entry.index === ch.index);
+      if (!mapped) throw new Error(`Chapter ${ch.index + 1} is missing from booknlp/chapter-map.json.`);
+      const fingerprint = crypto.createHash('sha256').update(JSON.stringify({
+        annotations: annotations.provenance.fingerprint, chapterMap, registry, corrections, chapter: ch.index, converter: SCRIPT_CONVERTER_VERSION,
+      })).digest('hex');
+      const scriptFile = `script/${String(ch.index).padStart(4, '0')}.json`;
       if (fs.existsSync(work.path(scriptFile))) {
-        // Keep per-chapter resume behavior, while repairing old output produced
-        // before the layout-only segment guard was added.
-        const existing = work.readJson<ChapterScript>(scriptFile);
-        if (existing.characterRegistryHash === registryHash) {
-          const text = fs.readFileSync(
-            work.path(`chapters-clean/${String(ch.index).padStart(2, '0')}.md`),
-            'utf8'
-          );
-          const { title } = splitLeadingChapterTitle(text);
-          const segments = withChapterTitle(existing.segments, title);
-          if (segments.length !== existing.segments.length || segments.some((segment, i) => segment !== existing.segments[i])) {
-            work.writeJson(scriptFile, { ...existing, segments });
-          }
+        const existing = ChapterScriptSchema.safeParse(work.readJson(scriptFile));
+        if (existing.success && existing.data.fingerprint === fingerprint) {
+          validateScriptCoverage(existing.data, input, mapped.start, mapped.end);
           update({ phase: 'skipped', completedChapters: chapterPosition + 1 });
           return;
         }
       }
 
-      const cleanedText = fs.readFileSync(
-        work.path(`chapters-clean/${String(ch.index).padStart(2, '0')}.md`),
-        'utf8'
-      );
-      const { title, content: text } = splitLeadingChapterTitle(cleanedText);
-
-      let segments: ScriptSegment[];
-      if (!analysis.isFiction) {
-        segments = text
-          .split(/\n\s*\n/)
-          .map((p) => p.trim())
-          .filter(Boolean)
-          .map((p) => ({ speaker: 'narrator', text: p, confidence: 'high' as const }));
-        update({ phase: 'saving', totalChars: text.length, processedChars: text.length });
-      } else {
-        segments = await attributeChapter(text, ch.index, ch.title, analysis, summaries, canonical, registry.characters, update);
+      const segments = annotationSegmentsForChapter(input, mapped, annotations.quotations, registry, corrections);
+      if (!mapped.titleInText && hasNarratableText(ch.title)) {
+        segments.unshift({ speaker: 'narrator', speakerId: 'narrator', text: ch.title, delivery: 'Announce the chapter title clearly.', confidence: 'high' });
       }
-
-      const candidates = segments.filter((segment) => segment.speaker !== 'narrator' && !canonical.has(segment.speaker.toLowerCase()));
-      const candidatesFile = `character-candidates/${String(ch.index).padStart(2, '0')}.json`;
-      if (candidates.length) {
-        work.writeJson(candidatesFile, { index: ch.index, candidates });
-        throw new Error(`New or unresolved speakers in chapter ${ch.index + 1}: ${[...new Set(candidates.map((s) => s.speaker))].join(', ')}. Review ${candidatesFile}, update chapter-characters/${String(ch.index).padStart(2, '0')}.json with supported identities, then run list-characters --rerun and script.`);
-      }
-      fs.rmSync(work.path(candidatesFile), { force: true });
-      const script: ChapterScript = { index: ch.index, characterRegistryHash: registryHash, segments: withChapterTitle(segments, title) };
+      const script: ChapterScript = { version: 2, format: 'plain-text', index: ch.index, characterRegistryHash: registryHash, fingerprint, segments };
+      validateScriptCoverage(script, input, mapped.start, mapped.end);
       work.writeJson(scriptFile, script);
+      saveUnresolvedQuotes(work, annotations.quotations, input, corrections, chapterMap);
+      update({ phase: 'saving', totalChars: mapped.end - mapped.start, processedChars: mapped.end - mapped.start });
       update({ phase: 'completed', completedChapters: chapterPosition + 1 });
     });
   }
 }
 
-async function attributeChapter(
-  text: string,
-  index: number,
-  title: string,
-  analysis: Analysis,
-  summaries: ChapterSummaries,
-  canonical: Map<string, string>,
-  characters: PersonProfile[],
-  update: (change: Partial<ChapterProgress>) => void,
-): Promise<ScriptSegment[]> {
-  const castList = characters
-    .map((c) => `- ${c.name}${c.aliases.length ? ` (aka ${c.aliases.join(', ')})` : ''}: ${c.sex}, ${c.age}, ${c.importance}`)
-    .join('\n');
-
-  const blocks = splitIntoBlocks(text, config.llmChunkChars);
-  const segments: ScriptSegment[] = [];
-  const totalChars = blocks.reduce((sum, block) => sum + block.length, 0);
-  let processedChars = 0;
-
-  for (const [i, block] of blocks.entries()) {
-    update({ phase: 'attributing', block: i + 1, totalBlocks: blocks.length, processedChars, totalChars });
-    const tail = segments.slice(-3).map((s) => `[${s.speaker}] ${s.text.slice(0, 120)}`).join('\n');
-    const result = await jsonCall({
-      model: config.chapterModel,
-      schema: SegmentsSchema,
-      system: `You convert book text into a multi-voice audiobook script. Respond with JSON: {"segments": [{"speaker", "text", "delivery"?, "confidence"}]}.
-
-Rules:
-- Split all narratable prose into an ordered list of segments, in order. Copy that text VERBATIM — never rewrite, drop, or summarize it.
-- Do not emit decorative layout-only section dividers, such as lines made solely of repeated asterisks, dashes, underscores, or whitespace. They are not narratable text and are excluded from the coverage requirement.
-- Every segment must contain spoken content (at least one letter or number); never return a punctuation-only segment.
-- "speaker" is "narrator" for all narration and dialogue tags ("she said"), or the character's name for quoted dialogue.
-- Dialogue tags stay with the narrator: '"Hello," said Tom.' becomes [Tom] "Hello," + [narrator] said Tom.
-- Keep quotation marks in the dialogue text.
-- "delivery" (optional): a short hint when the text makes it explicit, e.g. "whispering", "shouting", "sobbing".
-- "confidence": "high" when the speaker is clear, "low" when you are guessing.
-- Only use speaker names from the character list; if the speaker is not in the list or unclear, use the name you believe is right with confidence "low".
-- Merge consecutive narrator paragraphs into segments of at most 1500 characters.
-
-Examples:
-
----
-
-Example 1
-Context: Conversation between Bertram Lupov and Alexander Adell.
-
-Lupov cocked his head sideways. He had a trick of doing that when he wanted to be contrary, and he wanted to be contrary now, partly because he had had to carry the ice and glassware. "Not forever," he said.
-
-"Oh, hell, just about forever. Till the sun runs down, Bert. Ten billion, maybe. Are you satisfied?"
-
-Lupov put his fingers through his thinning hair as though to reassure himself that some was still left and sipped gently at his own drink. "Ten billion years isn't forever."
-
-"Well, it will last our time, won't it?"
-
----
-
-Output JSON:
-
-{
-  "speaker": "narrator",
-  "text": "Lupov cocked his head sideways. He had a trick of doing that when he wanted to be contrary, and he wanted to be contrary now, partly because he had had to carry the ice and glassware.",
-  "confidence": "high"
-},
-{
-  "speaker": "Bertram Lupov",
-  "text": "\"Not forever,\"",
-  "confidence": "high"
-},
-{
-  "speaker": "narrator",
-  "text": "he said.",
-  "confidence": "high"
-},
-{
-  "speaker": "Alexander Adell",
-  "text": "\"Oh, hell, just about forever. Till the sun runs down, Bert. Ten billion, maybe. Are you satisfied?\"",
-  "confidence": "high"
-},
-{
-  "speaker": "narrator",
-  "text": "Lupov put his fingers through his thinning hair as though to reassure himself that some was still left and sipped gently at his own drink.",
-  "confidence": "high"
-},
-{
-  "speaker": "Bertram Lupov",
-  "text": "\"Ten billion years isn't forever.\"",
-  "confidence": "high"
-},
-{
-  "speaker": "Alexander Adell",
-  "text": "\"Well, it will last our time, won't it?\"",
-  "confidence": "high"
-},
-
----
-
-Example 2
-Context: Conversation between Jerrodine and Jerrodd...
-
-Jerrodine's eyes were moist as she watched the visiplate. "I can't help it. I feel funny about leaving Earth."
-
-"Why, for Pete's sake?" demanded Jerrodd. "We had nothing there." Then, after a reflective pause, "I tell you, it's a lucky thing the computers worked out interstellar travel the way the race is growing."
-
-"I know, I know," said Jerrodine miserably.
-
----
-Output JSON for Example 2...
-
-{
-  "speaker": "narrator",
-  "text": "Jerrodine's eyes were moist as she watched the visiplate.",
-  "confidence": "high"
-},
-{
-  "speaker": "Jerrodine",
-  "text": "\"I can't help it. I feel funny about leaving Earth.\"",
-  "confidence": "high"
-},
-{
-  "speaker": "Jerrodd",
-  "text": "\"Why, for Pete's sake?\"",
-  "confidence": "high"
-},
-{
-  "speaker": "narrator",
-  "text": "demanded Jerrodd.",
-  "confidence": "high"
-},
-{
-  "speaker": "Jerrodd",
-  "text": "\"We had nothing there.\"",
-  "confidence": "high"
-},
-{
-  "speaker": "narrator",
-  "text": "Then, after a reflective pause,",
-  "confidence": "high"
-},
-{
-  "speaker": "Jerrodd",
-  "text": "\"I tell you, it's a lucky thing the computers worked out interstellar travel the way the race is growing.\"",
-  "confidence": "high"
-},
-{
-  "speaker": "Jerrodine",
-  "text": "\"I know, I know,\"",
-  "confidence": "high"
-},
-{
-  "speaker": "narrator",
-  "text": "said Jerrodine miserably.",
-  "confidence": "high"
-},
----
-`,
-      user: `Book: "${analysis.summary.slice(0, 400)}"
-Chapter ${index}: "${title}"${blocks.length > 1 ? ` (part ${i + 1} of ${blocks.length})` : ''}
-Chapter summary: ${summaries[index] ?? ''}
-
-Characters:
-${castList}
-${tail ? `\nPrevious segments (context):\n${tail}` : ''}
-
-Text:
-${block}`,
+export function annotationSegmentsForChapter(
+  input: string,
+  chapter: { index: number; start: number; end: number },
+  quotations: BookAnnotations['quotations'],
+  registry: CharacterRegistry,
+  corrections: Corrections,
+): ScriptSegment[] {
+  const quotes = quotations
+    .filter((quote) => quote.chapterIndex === chapter.index || (quote.chapterIndex === null && quote.start < chapter.end && quote.end > chapter.start))
+    .map((quote) => ({ ...quote, start: Math.max(quote.start, chapter.start), end: Math.min(quote.end, chapter.end) }))
+    .sort((a, b) => a.start - b.start);
+  const result: ScriptSegment[] = [];
+  let cursor = chapter.start;
+  const addNarration = (start: number, end: number) => {
+    const text = sliceCodePoints(input, start, end);
+    if (hasNarratableText(text)) result.push({ speaker: 'narrator', speakerId: 'narrator', text, confidence: 'high', sourceStart: start, sourceEnd: end });
+  };
+  for (const quote of quotes) {
+    if (quote.start < cursor || quote.end > chapter.end) throw new Error(`Quotation ${quote.id} has invalid chapter boundaries.`);
+    addNarration(cursor, quote.start);
+    const override = corrections.quotationSpeakers[quote.id];
+    const narratorAssignment = override === 'narrator' || (quote.entityId === 'booknlp:0' && !override);
+    let character = override ? registry.characters.find((entry) => entry.id === override) : registry.characters.find((entry) => quote.entityId && entry.sourceEntityIds.includes(quote.entityId));
+    const mergeInto = character && corrections.characters[character.id]?.mergeInto;
+    if (mergeInto) character = registry.characters.find((entry) => entry.id === mergeInto) ?? character;
+    const resolved = narratorAssignment || Boolean(character);
+    result.push({
+      speaker: narratorAssignment ? 'narrator' : (character?.name ?? 'Unresolved speaker'),
+      speakerId: narratorAssignment ? 'narrator' : (character?.id ?? 'unresolved'),
+      text: sliceCodePoints(input, quote.start, quote.end),
+      confidence: resolved ? 'high' : 'low', sourceStart: quote.start, sourceEnd: quote.end, quotationId: quote.id,
     });
-    const auditCandidates = findNarrationAuditCandidates(result.segments);
-    if (auditCandidates.length) {
-      update({ phase: 'repairing', processedChars, auditedSegments: auditCandidates.length });
-    }
-    segments.push(...await repairNarrationBoundaries(result.segments, castList, characters));
-    processedChars += block.length;
+    cursor = quote.end;
   }
-
-  // Normalize speaker names; collect ambiguous segments for verification.
-  const ambiguous: number[] = [];
-  segments.forEach((seg, i) => {
-    if (seg.speaker.toLowerCase() === 'narrator') {
-      seg.speaker = 'narrator';
-      return;
-    }
-    const canon = canonical.get(seg.speaker.toLowerCase());
-    if (canon) seg.speaker = canon;
-    if (!canon || seg.confidence === 'low') ambiguous.push(i);
-  });
-
-  // Verification pass: re-attribute ambiguous segments with surrounding context.
-  if (ambiguous.length > 0) {
-    update({ phase: 'verifying', processedChars, ambiguousSegments: ambiguous.length });
-    const items = ambiguous
-      .map((i) => {
-        const ctx = segments
-          .slice(Math.max(0, i - 2), i + 3)
-          .map((s, j) => `${Math.max(0, i - 2) + j === i ? '>>' : '  '} [${s.speaker}] ${s.text.slice(0, 200)}`)
-          .join('\n');
-        return `Segment id ${i} (marked ">>"):\n${ctx}`;
-      })
-      .join('\n\n');
-
-    const verified = await jsonCall({
-      model: config.analysisModel,
-      schema: VerifySchema,
-      system: `You verify speaker attribution in an audiobook script. For each segment id, decide who speaks the ">>" line. Respond with JSON: {"attributions": [{"id": number, "speaker": "name"}]}. Prefer canonical names from the character list. If a speaking character is missing, return their supported name or a specific role label for review. Use "unresolved speaker" if dialogue cannot be attributed. Use "narrator" only for narration; missing characters are not narration.`,
-      user: `Characters:\n${castList}\n\n${items}`,
-    });
-
-    const byId = new Map(verified.attributions.map((a) => [a.id, a.speaker]));
-    for (const i of ambiguous) {
-      const speaker = byId.get(i);
-      const canon = speaker && canonical.get(speaker.toLowerCase());
-      segments[i].speaker =
-        speaker?.toLowerCase() === 'narrator' ? 'narrator' : (canon ?? speaker ?? 'unresolved speaker');
-      segments[i].confidence = canon || speaker?.toLowerCase() === 'narrator' ? 'high' : 'low';
-    }
-  }
-
-  update({ phase: 'saving', processedChars });
-  return segments;
+  addNarration(cursor, chapter.end);
+  return filterNarratableSegments(result);
 }
+
+export function validateScriptCoverage(script: ChapterScript, input: string, chapterStart: number, chapterEnd: number): void {
+  if (chapterEnd > chapterStart && !script.segments.some((segment) => hasNarratableText(segment.text))) {
+    throw new Error(`Script for chapter ${script.index + 1} is empty even though the prepared chapter contains narration.`);
+  }
+  let cursor = chapterStart;
+  for (const segment of script.segments.filter((entry) => entry.sourceStart !== undefined)) {
+    const start = segment.sourceStart!; const end = segment.sourceEnd!;
+    if (start < cursor || end < start || end > chapterEnd) throw new Error(`Script coverage is out of order or overlapping at source offset ${start}.`);
+    if (hasNarratableText(sliceCodePoints(input, cursor, start))) throw new Error(`Script coverage omits source text at offsets ${cursor}..${start}.`);
+    if (segment.text !== sliceCodePoints(input, start, end)) throw new Error(`Script segment rewrites source text at offsets ${start}..${end}.`);
+    cursor = end;
+  }
+  if (hasNarratableText(sliceCodePoints(input, cursor, chapterEnd))) throw new Error(`Script coverage omits source text at offsets ${cursor}..${chapterEnd}.`);
+}
+
+function saveUnresolvedQuotes(work: WorkDir, quotations: BookAnnotations['quotations'], input: string, corrections: Corrections, chapterMap: ChapterMap): void {
+  const unresolved = quotations.filter((quote) => quote.assignment === 'unresolved' && !corrections.quotationSpeakers[quote.id]).map((quote) => ({
+    id: quote.id, chapterIndex: quote.chapterIndex, text: quote.text,
+    chapterIndexes: chapterMap.chapters.filter((chapter) => quote.start < chapter.end && quote.end > chapter.start).map((chapter) => chapter.index),
+    context: sliceCodePoints(input, Math.max(0, quote.start - 120), Math.min([...input].length, quote.end + 120)),
+  }));
+  if (unresolved.length) work.writeJson('unresolved-quotes.json', { version: 1, quotations: unresolved });
+  else fs.rmSync(work.path('unresolved-quotes.json'), { force: true });
+}
+
+function sliceCodePoints(text: string, start: number, end: number): string { return [...text].slice(start, end).join(''); }

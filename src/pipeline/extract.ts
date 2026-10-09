@@ -5,7 +5,7 @@ import type { BookMetadata, ExtractedChapter } from '../types.js';
 import { reportProgress } from '../util/progress.js';
 import { readSource, type SourceMetadataOverrides } from '../source/read.js';
 
-/** Stage 1: source document -> one markdown file per chapter + metadata.json + cover. */
+/** Stage 1: source document -> one canonical plain-text file per chapter. */
 export async function runExtract(sourcePath: string, work: WorkDir, overrides?: SourceMetadataOverrides): Promise<BookMetadata> {
   reportProgress({ activity: 'Opening source document and reading its contents' });
   const source = await readSource(sourcePath, overrides);
@@ -24,15 +24,15 @@ export async function runExtract(sourcePath: string, work: WorkDir, overrides?: 
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-|-$/g, '')
         .slice(0, 40) || 'section';
-    const file = `chapters/${String(index).padStart(2, '0')}-${slug}.md`;
-    fs.writeFileSync(work.path(file), item.markdown);
+    const file = `chapters/${String(index).padStart(4, '0')}-${slug}.txt`;
+    fs.writeFileSync(work.path(file), item.text);
 
     chapters.push({
       index,
       id: item.id,
       title,
       file,
-      words: countWords(item.markdown),
+      words: countWords(item.text),
       isNav: item.isNav,
     });
     reportProgress({ activity: `Extracted ${title}`, completedUnits: index + 1, totalUnits: source.chapters.length, unit: 'chapters extracted' });

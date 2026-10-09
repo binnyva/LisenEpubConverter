@@ -1,13 +1,13 @@
 import fs from 'node:fs';
 import { jsonCall } from '../providers/llm/openai.js';
 import { config } from '../config.js';
-import { CastingSchema, type Analysis, type Casting, type ChapterScript } from '../types.js';
+import { CastingSchema, ManualSpeakerSettingsSchema, type Analysis, type Casting, type ChapterScript } from '../types.js';
 import type { WorkDir } from '../state.js';
 import { readCharacterRegistry } from './list-characters.js';
 import { reportProgress } from '../util/progress.js';
 
 /**
- * Stage 6: describe intended character voices without selecting a provider or model.
+ * Stage 7: describe intended character voices without selecting a provider or model.
  */
 export async function runCasting(work: WorkDir): Promise<Casting> {
   reportProgress({ activity: 'Reading character profiles and counting scripted speakers' });
@@ -20,7 +20,8 @@ export async function runCasting(work: WorkDir): Promise<Casting> {
     const script = work.readJson<ChapterScript>(`script/${file}`);
     for (const seg of script.segments) {
       if (seg.speaker !== 'narrator') {
-        counts.set(seg.speaker, (counts.get(seg.speaker) ?? 0) + 1);
+        const key = seg.speakerId ?? seg.speaker;
+        counts.set(key, (counts.get(key) ?? 0) + 1);
       }
     }
   }
@@ -47,12 +48,12 @@ export async function runCasting(work: WorkDir): Promise<Casting> {
   }
 
   const castDetails = ranked
-    .map(([name, count]) => {
-      const c = registry.characters.find((ch) => ch.name === name);
+    .map(([speakerId, count]) => {
+      const c = registry.characters.find((ch) => ch.id === speakerId || ch.name === speakerId);
       const traits = c
         ? `${c.sex}, age ${c.age}, ${c.race}, ${c.class}, ${c.country}`
         : 'unknown traits';
-      return `- ${name} (${count} spoken segments): ${traits}`;
+      return `- key ${speakerId}: ${c?.name ?? speakerId} (${count} spoken segments): ${traits}`;
     })
     .join('\n');
 
@@ -79,11 +80,12 @@ ${castDetails}`,
 
   reportProgress({ activity: 'Checking and saving voice profiles', phase: 'saving' });
   casting.version = 2;
-  for (const [name] of ranked) {
-    const assignment = casting.characters[name];
+  const normalizedCharacters: Casting['characters'] = {};
+  for (const [speakerId] of ranked) {
+    const c = registry.characters.find((ch) => ch.id === speakerId || ch.name === speakerId);
+    const assignment = casting.characters[speakerId] ?? (c ? casting.characters[c.name] : undefined);
     if (!assignment) {
-      const c = registry.characters.find((ch) => ch.name === name);
-      casting.characters[name] = {
+      normalizedCharacters[speakerId] = {
         voiceProfile: {
           presentation: c?.sex ?? 'unknown',
           age: c?.age ?? 'unknown',
@@ -93,7 +95,13 @@ ${castDetails}`,
         },
         instructions: '',
       };
-    }
+    } else normalizedCharacters[speakerId] = assignment;
+  }
+  casting.characters = normalizedCharacters;
+  if (fs.existsSync(work.path('manual-speaker-settings.json'))) {
+    const manual = ManualSpeakerSettingsSchema.parse(work.readJson('manual-speaker-settings.json'));
+    if (manual.instructions.narrator !== undefined) casting.narrator.instructions = manual.instructions.narrator;
+    for (const [id, instructions] of Object.entries(manual.instructions)) if (casting.characters[id]) casting.characters[id].instructions = instructions;
   }
 
   work.writeJson('casting.json', casting);

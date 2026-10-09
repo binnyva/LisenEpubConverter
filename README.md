@@ -1,25 +1,29 @@
 # Lisen Document Convertor
 
-CLI and local web workspace for [lisentome.com](https://lisentome.com/): converts an EPUB, text PDF, HTML, Markdown document, or an HTML page URL into a multi-voice M4B audiobook. An LLM analyzes the book, attributes dialogue to characters, and describes each speaker's desired voice. A shared voice library supplies concrete voice assignments; ffmpeg assembles the result into a single `.m4b` with chapter markers, tags, and cover art. OpenAI and OpenRouter are supported for text processing and speech synthesis.
+CLI and local web workspace for [lisentome.com](https://lisentome.com/): converts an EPUB, text PDF, HTML, Markdown, plain-text document, or HTML page URL into a multi-voice M4B audiobook. A local BookNLP pipeline identifies entities, links coreference, and attributes quotations across the whole book. LLM use remains limited to book analysis and voice casting; deterministic converters preserve the exact prepared source text. A shared voice library supplies concrete voice assignments, TTS produces cached audio, and ffmpeg assembles the result.
 
 ## Requirements
 
-- Node 22.12+ (the current Commander dependency requires it, although `package.json` still declares Node 20+)
+- Node 22.12+
 - ffmpeg + ffprobe on PATH (`brew install ffmpeg`)
-- An API key for each configured provider: `OPENAI_API_KEY` and/or `OPENROUTER_API_KEY`. The CLI loads the first `.env` found in the current directory or project root.
+- Conda environment `booknlp` containing BookNLP, `en_core_web_sm`, and the selected local model files. The default Conda executable is `/Users/binnyva/Projects/Tools/MiniConda3/bin/conda`.
+- An API key only for a stage that uses a configured provider: Analyze/Casting use the LLM key and Synth uses the provider saved in `voice-bindings.json`.
+
+Lisen never installs Python packages or downloads BookNLP models. Missing dependencies produce an actionable error. BookNLP 1.0.8's published weights contain obsolete BERT `position_ids` entries; the repository runner removes only those entries in memory while loading, following the upstream compatibility fix, without modifying the environment or model files.
 
 ## Usage
 
 ```bash
 npm install
 npm run dev -- convert story.md --dry-run         # prepare scripts, casting, and voices
+npm run dev -- convert story.txt --dry-run        # plain text is supported directly
 npm run dev -- convert story.pdf                  # resume through paid TTS and assembly
 npm run dev -- status story.html                  # stage completion
 npm run dev -- convert https://example.com/story  # download HTML, then convert
 npm run dev -- ui                               # local web workspace
 ```
 
-`--dry-run` still makes billable LLM calls; it stops before TTS and assembly. Review `script/`, `casting.json`, and `voice-bindings.json` before continuing. `extract` and voice-library operations are offline. The bundled `library/voices.json` supports the default OpenAI target without a refresh.
+`--dry-run` still makes the billable Analyze and Casting LLM calls; it stops before TTS and assembly. BookNLP, extraction, deterministic preparation/script conversion, and voice-library operations are local/offline. Review unresolved quotations, `script/`, `casting.json`, and `voice-bindings.json` before continuing.
 
 Options for `convert`:
 
@@ -27,27 +31,28 @@ Options for `convert`:
 | --- | --- |
 | `--out <dir>` | Export the final `.m4b` to a different directory (by default it is saved in that book's work folder) |
 | `--work <dir>` | Work directory for intermediate artifacts (default `./work`) |
-| `--from <stage>` | Rebuild that stage and derived artifacts, then continue: extract, analyze, chapters, list-characters, script, casting, voices, synth, assemble |
+| `--from <stage>` | Rebuild that stage and derived artifacts, then continue: extract, analyze, chapters, booknlp, list-characters, script, casting, voices, synth, assemble |
 | `--force` | Rebuild from extract and continue; retain the TTS audio cache |
 | `--dry-run` | Stop before synthesis so scripts, casting, and voice bindings can be reviewed |
 
 ## Pipeline
 
 ```
-Source document → extract → analyze → chapters → list-characters → script → casting → voices → synth → assemble → book.m4b
+Source document → extract → analyze → chapters → booknlp → list-characters → script → casting → voices → synth → assemble → book.m4b
 ```
 
-1. **extract** — source document → one markdown file per chapter (`chapters/`), plus `metadata.json` and an EPUB cover when available. HTML becomes audio-friendly Markdown; Markdown is preserved; a standalone PDF/HTML/Markdown story becomes one chapter.
-2. **analyze** — sampled LLM overview: fiction detection, provisional book summary and character candidates, author profile, and a narrate/skip decision per chapter (ToC, acknowledgments, license pages etc. are skipped).
-3. **chapters** — per-chapter summary, minimal audio-friendly cleanup (`chapters-clean/`), and speaking-character observations with evidence (`chapter-characters/`). Discovery reads every chunk of each narratable chapter, including late appearances and unnamed speakers.
-4. **list-characters** — **List Characters** consolidates all narratable chapters into the book-specific `characters.json` registry. This offline stage merges exact names and unambiguous explicit aliases, preserves evidence and stable IDs, and flags uncertain identities or conflicting traits. Generic unnamed roles are scoped to their chapter.
-5. **script** — dialogue attribution into `{speaker, text, delivery?, confidence}` segments (`script/`), with a verification pass on ambiguous speakers. Non-fiction uses the narrator. Fiction uses the character registry even when Analyze found no characters. Newly discovered or unresolved speakers are saved in `character-candidates/` for review rather than silently becoming narrator dialogue. Layout-only dividers are removed and non-breaking spaces normalized, including when existing chapter scripts are resumed.
-6. **casting** — desired voice profile and delivery instructions per speaker (`casting.json`), independent of any TTS model.
-7. **voices** — match the cast against the shared voice library and save concrete, reviewable provider/model/voice assignments in `voice-bindings.json`, including match reasons and limitations. Every scripted speaker must have a casting entry.
-8. **synth** — validate voice bindings, split speakable text into requests, and cache completed MP3s by content hash in `audio-cache/`. Existing cache files are reused. Requests include a language guard to keep the narration in the book's language.
-9. **assemble** — ffmpeg concat into per-chapter M4As, then a single `.m4b` with chapter markers, tags, and cover art.
+1. **extract** — every source reader produces Unicode-preserving plain text in `chapters/`, with titles/order/metadata/cover stored separately. Markdown is parsed structurally rather than stripped with broad expressions.
+2. **analyze** — one sampled LLM overview and a reviewable narrate/skip plan. Structural chapter evidence takes precedence over broad title keywords.
+3. **chapters** — deterministic normalization into frozen `chapters-clean/*.txt`; no chapter rewriting or mandatory summaries.
+4. **booknlp** — assemble all narratable chapters into `booknlp/input.txt`, record exact Unicode code-point boundaries in `chapter-map.json`, run `entity,quote,coref` once for the complete book, preserve raw outputs, and publish validated `annotations.json` atomically.
+5. **list-characters** — build `characters.json` from every attributed entity, including minor, unnamed, duplicate-name, and nonhuman speakers. Application IDs remain stable where evidence reconciles unambiguously; inferred pronouns stay separate from presentation traits.
+6. **script** — deterministically interleave quotation spans and surrounding narrator prose, slice exact wording from frozen input, map back to chapters, and validate complete ordered coverage. Unresolved/cross-chapter quotations are saved for manual review without an LLM fallback.
+7. **casting** — LLM-generated desired voice profiles keyed by stable speaker ID.
+8. **voices** — bind the cast to provider/model/native voices. Compatible manual choices are persisted separately and reapplied.
+9. **synth** — block affected unresolved quotations, split plain text with Unicode-safe bounds, deduplicate identical in-flight requests, and retain repeated occurrences in ordered, fingerprinted manifests.
+10. **assemble** — use exactly the current narration plan in numeric chapter order. Encoded M4As are reused only when manifest and encoding fingerprints match; final M4Bs are published atomically.
 
-Every stage records completion in `work/<book>/state.json`; re-running resumes where it left off. `chapters`, `script`, and `synth` track chapter completion; synthesis also reuses individual cached segments. Assembly reuses encoded chapter M4As. If the source content changes, existing history and artifacts are preserved and further runs are blocked until an explicit Extract rebuild:
+Every stage records completion in `work/<book>/state.json`; `chapters`, `script`, and `synth` track the exact narration plan by chapter. Assembly reuses an encoded chapter only when its manifest and encoding sidecar fingerprints match. Stale files outside the current plan are ignored. If source content changes, runs are blocked until an explicit Extract rebuild:
 
 ```bash
 npm run dev -- run story.pdf extract --rebuild
@@ -57,7 +62,7 @@ npm run dev -- run story.pdf extract --rebuild
 
 Run `npm run dev -- ui` and open `http://127.0.0.1:3188`. Use `--port` and `--work` to change the port and work root. Finished M4Bs are saved in each book's work folder; pass `--out` only to export them elsewhere. The server binds to localhost and runs one stage job at a time; provider requests originate from Node using the configured API keys.
 
-The workspace shows the provisional book analysis, discovered characters and registry review issues, chapter readiness, and editable speaker instructions and voice assignments. Use the settings gear to choose an OpenAI or OpenRouter **text-processing** provider and a model for new Analyze, Chapters, List Characters, Script, and Casting jobs. The model field offers fuzzy-matched suggestions and one-click starred models. Select chapters, use **Run** to rerun a stage or **Rebuild all** to clear its derived output, and use **Cmd** to copy the corresponding CLI command. The stage activity panel retains start/completion events, retry warnings, and failures for the displayed job. Saving casting changes makes synthesis and assembly stale while preserving cached MP3s.
+The workspace shows the provisional analysis, editable narrate/skip plan, BookNLP-derived speakers, unresolved quotations with speaker selectors, chapter readiness, and editable speaker instructions and voice assignments. Text-provider settings affect Analyze and Casting only; BookNLP and Script need no API key. Select chapters, use **Run** or **Rebuild all**, and use **Cmd** to copy the equivalent CLI command. Saving corrections regenerates scripts without rerunning BookNLP; paid MP3 cache files are retained.
 
 The model list lives in [`library/preferred-models.json`](library/preferred-models.json) and is re-read whenever the settings dialog opens, so it can be edited while the UI server is running:
 
@@ -89,13 +94,21 @@ npm run dev -- run story.md script --rebuild  # clear derived output and rerun s
 
 `run` executes exactly one stage and checks prerequisites; it does not run missing earlier stages. `chapters`, `script`, `synth`, and `assemble` accept zero-based chapter indexes (the UI displays chapter numbers starting at 1). Standalone stories have chapter `0`. Selected assembly creates a separate file such as `Book Title - chapters 0.m4b` and does not mark full-book assembly complete. `books`, `status`, and `run` support `--json`; stage code may still emit progress or warnings during `run --json`.
 
-Supported sources are `http://` or `https://` HTML URLs plus `.epub`, `.pdf`, `.html`, `.htm`, `.md`, and `.markdown` files. A URL is downloaded when a new work folder needs its title, and Extract downloads it again to save the source content; run `extract --rebuild` to download a fresh copy. URL imports accept HTML or text responses up to 10 MB. Use `--title`, `--author`, and `--language` on `convert` or `run … extract` to override missing source metadata. Text PDFs are supported; scanned or image-only PDFs need OCR before import, and password-protected PDFs must be unlocked first.
+Supported sources are `http://` or `https://` HTML URLs plus `.epub`, `.pdf`, `.html`, `.htm`, `.md`, `.markdown`, and `.txt` files. A URL is downloaded when a new work folder needs its title, and Extract downloads it again to save the source content; run `extract --rebuild` to download a fresh copy. URL imports accept HTML or text responses up to 10 MB. Use `--title`, `--author`, and `--language` to correct source metadata. Text PDFs are supported; scanned or image-only PDFs need OCR first.
 
 All stages report activity in the CLI and the UI’s Stage activity panel. Analyze and Casting show preparation, a waiting indicator during their single model request, and saving. Chapters and Script show text processed by block and completed chapter counts. Synth shows audio segments ready, including cache hits. Assembly shows encoded chapters, duration reads, joining, and M4B export; ffmpeg runs asynchronously so the UI stays responsive. Extract, List Characters, and Voices report local-work milestones and counts. Short local stages may finish between UI polls; their milestones remain in the activity log.
 
 Long-running activities print elapsed-time updates every 10 seconds; the UI updates elapsed time while polling and uses an indeterminate bar when there is no measurable percentage. Percentages describe the current activity’s units, not time remaining or full-stage completion (for example, encoding can reach 100% before M4B export). UI progress tracks jobs started in that UI server; separate CLI runs are not attached to it.
 
-List Characters requires all narratable chapters and does not accept `--chapters`. For an older work folder, run `chapters` without `--rerun` to backfill missing character observations while retaining cleaned text and summaries (billable LLM discovery for fiction), then run `list-characters`. Script regenerates chapter scripts when their registry hash changes. A changed registry also clears derived audio manifests and encoded M4As so assembly cannot reuse old speaker assignments; paid MP3 caches and exported books remain. If Script reports new speakers, the workspace failure panel offers **Ask LLM to propose speaker resolutions**. It preselects only evidence-backed matches or new roles in Character Review; inspect the proposal and save the registry to resume Script at the failed chapter. The manual fallback is to review `character-candidates/`, add supported identities or aliases to the corresponding `chapter-characters/` file, and rerun `list-characters --rerun`, then Script.
+BookNLP and List Characters are whole-book stages and do not accept `--chapters`; Script can regenerate selected chapters from the whole-book annotations. Resolve entries in `unresolved-quotes.json` through the workspace (or `corrections.json`) and rerun Script—BookNLP does not need to rerun. Synthesis blocks only selections affected by unresolved quotations. Existing name-keyed casts/bindings are migrated to stable IDs when the match is unambiguous; legacy manifests without provenance must be regenerated, reusing paid MP3 cache entries where their request hashes still match.
+
+For a workspace created before canonical plain-text/BookNLP support, rebuild from Extract so old Markdown-derived offsets cannot be reused:
+
+```bash
+npm run dev -- convert old-book.epub --from extract --dry-run
+```
+
+This retains `audio-cache/`, prior exported books, `corrections.json`, and compatible manual speaker settings, but it reruns Analyze and Casting and therefore makes billable LLM calls. Fix the BookNLP Conda environment and install the selected model files explicitly before migrating; Lisen never modifies that environment for you.
 
 Without extra flags, completed stages and existing chapter output are reused. `--rerun` invalidates completion from that stage onward and clears the stage output needed to execute it again; downstream artifacts remain. `--rebuild` clears that stage's derived artifacts as well, but runs only the requested stage. It cannot be combined with `--chapters` or `--rerun`. Both preserve `audio-cache/`. Use a rebuild when upstream edits require regenerating downstream artifacts.
 
@@ -105,32 +118,35 @@ Each book gets `work/<book-slug>/` containing its intermediate artifacts and aud
 
 ```
 work/alice/
-  state.json               # source hash, stage/chapter completion, synthesis input hash
+  state.json               # source hash, completion, and synthesis input hash
   metadata.json  cover.jpg # from extract
-  chapters/                # raw markdown, one file per chapter
+  chapters/                # canonical plain text, one file per chapter
   analysis.json            # fiction flag, summary, characters, narrate/skip
-  chapters-clean/          # audio-friendly text
-  chapter-summaries.json
-  chapter-characters/      # per-chapter character observations and evidence
-  characters.json          # consolidated book character registry
-  character-candidates/    # unresolved Script speakers, when present
-  script/                  # per-chapter {speaker, text, delivery?, confidence} segments
+  chapters-clean/          # frozen normalized plain text
+  booknlp/input.txt        # exact whole-book annotation input
+  booknlp/chapter-map.json # Unicode code-point chapter boundaries
+  booknlp/output/          # raw BookNLP inspection files
+  booknlp/annotations.json # validated normalized annotations
+  corrections.json        # persistent character and quotation corrections
+  unresolved-quotes.json  # manual review queue
+  characters.json         # stable-ID speaker registry
+  script/                  # exact-source segments and fingerprints
   casting.json             # speaker → desired voice profile + instructions
   casting.legacy.json      # backup if an old model-specific cast was migrated
   voice-bindings.json      # speaker → concrete library/provider/model/voice choice
+  manual-speaker-settings.json # persistent instructions/manual bindings
   audio-cache/             # one mp3 per synthesized segment, keyed by hash
   audio/                   # per-chapter m4a + segment manifests
   Book Title.m4b           # assembled audiobook
 ```
 
-Text artifacts are inspectable JSON/markdown, so outputs can be reviewed or corrected before the next stage runs. The final M4B is saved in its book's work folder using the book metadata title. Pass `--out` to export it to another directory. Completed cache files are keyed by provider, model, native voice ID, delivery instructions, and speakable text; changing those inputs can incur new TTS charges. Rebuilds retain the cache and previously assembled M4Bs; assembly overwrites a matching output filename.
+Text artifacts are inspectable JSON/plain text. Generated artifacts can be rebuilt; corrections and manual speaker settings live separately and are reapplied when compatible. The final M4B is published atomically. Completed cache files keep the existing provider/model/native-voice/instructions/text key convention; the request-only language guard remains excluded.
 
 ## Configuration
 
 Environment variables (see `src/config.ts` for defaults):
 
 - `LISEN_ANALYSIS_MODEL` — model for whole-book analysis (default `gpt-4.1`)
-- `LISEN_CHAPTER_MODEL` — model for per-chapter work (default `gpt-4.1-mini`)
 - `LISEN_TTS_MODEL` — default TTS target (`gpt-4o-mini-tts` for OpenAI; `openai/gpt-4o-mini-tts-2025-12-15` for OpenRouter)
 - `LISEN_LLM_PROVIDER` — text-processing provider: `openai` or `openrouter` (default `openai`)
 - `LISEN_LLM_RESPONSE_TIMEOUT_MS` — maximum wait for each text-model response before retrying (default `120000`)
@@ -148,6 +164,10 @@ Environment variables (see `src/config.ts` for defaults):
 - `LISEN_TTS_MAX_CHARS` — maximum characters in one TTS request (default `4000`)
 - `LISEN_TTS_VOICES_FILE` — JSON catalogue of voices for a non-OpenAI OpenRouter speech model
 - `LISEN_VOICE_LIBRARY_FILE` — shared model and voice library path (default `./library/voices.json`, relative to the current directory)
+- `LISEN_CONDA_EXECUTABLE` — Conda executable (default `/Users/binnyva/Projects/Tools/MiniConda3/bin/conda`)
+- `LISEN_BOOKNLP_ENV` — Conda environment name (default `booknlp`)
+- `LISEN_BOOKNLP_MODEL` — `big` (default) or `small`
+- `LISEN_BOOKNLP_TIMEOUT_MS` — whole-book subprocess timeout (default one hour)
 
 Other tunables (concurrency, chunk sizes, voice slots, bitrate) are constants in `src/config.ts`.
 
@@ -159,7 +179,6 @@ OpenRouter can be used for text processing, speech synthesis, or both. Its text 
 OPENROUTER_API_KEY=sk-or-...
 LISEN_LLM_PROVIDER=openrouter
 LISEN_ANALYSIS_MODEL=anthropic/claude-sonnet-4
-LISEN_CHAPTER_MODEL=google/gemini-2.5-flash
 # Never route an LLM request above these per-million-token prices:
 LISEN_OPENROUTER_MAX_PRICE={"prompt":0.10,"completion":0.40}
 LISEN_TTS_PROVIDER=openrouter
@@ -218,6 +237,6 @@ npm test                # vitest, fully offline
 npm run test:watch      # offline tests in watch mode
 ```
 
-The `lisen` executable points to `dist/cli.js`; build before using an installed or linked binary. Tests cover EPUB, PDF, HTML, and Markdown extraction; text and script cleanup; provider requests with mocks; voice libraries and migration; state tracking; retry events; and UI activity rendering. No live LLM or TTS requests are made by the test suite.
+The `lisen` executable points to `dist/cli.js`; build before using an installed or linked binary. Tests cover plain-text extraction, Unicode offset recovery, deterministic quotation conversion and coverage, stable identity reconciliation/corrections, TTS deduplication/failure settling, workspace locks, authoritative assembly, atomic publication, providers, voices, state, and UI rendering. No live LLM or TTS requests are made by the suite.
 
 See [AGENTS.md](AGENTS.md) for a code map and contributor conventions.

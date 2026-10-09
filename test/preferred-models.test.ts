@@ -56,7 +56,6 @@ describe('preferred UI models', () => {
       await Promise.resolve();
       expect(config.llmProvider).toBe('openrouter');
       expect(config.analysisModel).toBe('provider/selected-model');
-      expect(config.chapterModel).toBe('provider/selected-model');
     });
     expect(config.llmProvider).toBe('openai');
     expect(config.analysisModel).toBe('default-model');

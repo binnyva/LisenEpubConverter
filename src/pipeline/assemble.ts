@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -6,7 +7,7 @@ import { config } from '../config.js';
 import { reportProgress } from '../util/progress.js';
 import { taskCancellationSignal, throwIfTaskCancelled } from '../util/cancellation.js';
 import type { WorkDir } from '../state.js';
-import type { BookMetadata, ChapterAudioManifest } from '../types.js';
+import type { Analysis, BookMetadata, ChapterAudioManifest, ChapterScript } from '../types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -28,22 +29,34 @@ function escapeMeta(s: string): string {
 }
 
 /**
- * Stage 9: concatenate cached segments into per-chapter M4A files, then all
+ * Stage 10: concatenate cached segments into per-chapter M4A files, then all
  * chapters into a single M4B with chapter markers, tags and cover art.
  */
 export async function runAssemble(work: WorkDir, outDir?: string, chapterIndexes?: number[]): Promise<string> {
   throwIfTaskCancelled();
   reportProgress({ activity: 'Reading synthesized chapter manifests' });
   const meta = work.readJson<BookMetadata>('metadata.json');
+  const analysis = work.readJson<Analysis>('analysis.json');
   work.dir('audio');
-
-  const manifests = fs
-    .readdirSync(work.path('audio'))
-    .filter((f) => f.endsWith('-segments.json'))
-    .filter((f) => !chapterIndexes || chapterIndexes.includes(Number.parseInt(f, 10)))
-    .sort()
-    .map((f) => work.readJson<ChapterAudioManifest>(`audio/${f}`));
-  if (manifests.length === 0) throw new Error('No synthesized chapters found — run synth first.');
+  const expected = meta.chapters.filter((chapter) => analysis.chapters.some((plan) => plan.index === chapter.index && plan.narrate)).map((chapter) => chapter.index);
+  const selected = chapterIndexes ?? expected;
+  if (!selected.length) throw new Error('The current narration plan has no chapters to assemble.');
+  if (selected.some((index) => !expected.includes(index))) throw new Error('One or more selected chapters are not in the current narration plan.');
+  const manifests = selected.map((index) => {
+    const file = `audio/${String(index).padStart(4, '0')}-segments.json`;
+    if (!fs.existsSync(work.path(file))) throw new Error(`Synthesized manifest is missing for requested chapter ${index + 1}. Run synth for the complete selection.`);
+    const manifest = work.readJson<ChapterAudioManifest>(file);
+    if (manifest.index !== index) throw new Error(`${file} contains chapter index ${manifest.index}; expected ${index}.`);
+    if (!manifest.fingerprint || !manifest.encoding || !manifest.scriptFingerprint) throw new Error(`${file} is a legacy manifest without freshness provenance. Rerun synth; cached paid MP3s will be reused.`);
+    const currentEncoding = { codec: 'aac', bitrate: config.audioBitrate, sampleRate: 44100, channels: 1 };
+    if (JSON.stringify(manifest.encoding) !== JSON.stringify(currentEncoding)) throw new Error(`Chapter ${index + 1} encoding settings changed. Rerun synth to refresh its manifest.`);
+    const scriptFile = `script/${String(index).padStart(4, '0')}.json`;
+    const script = work.readJson<ChapterScript>(scriptFile);
+    const scriptFingerprint = script.fingerprint ?? crypto.createHash('sha256').update(JSON.stringify(script)).digest('hex');
+    if (scriptFingerprint !== manifest.scriptFingerprint) throw new Error(`Chapter ${index + 1} synthesis is stale because its script changed. Rerun synth.`);
+    for (const hash of manifest.segments) if (!fs.existsSync(work.path('audio-cache', `${hash}.mp3`))) throw new Error(`Cached audio ${hash} required by chapter ${index + 1} is missing. Rerun synth.`);
+    return manifest;
+  });
 
   // 1. Per-chapter concat + AAC encode (skipped when the chapter m4a exists).
   const chapterTitle = (index: number): string =>
@@ -51,12 +64,14 @@ export async function runAssemble(work: WorkDir, outDir?: string, chapterIndexes
   let encoded = 0;
   for (const manifest of manifests) {
     throwIfTaskCancelled();
-    const chapterFile = work.path('audio', `${String(manifest.index).padStart(2, '0')}.m4a`);
+    const chapterFile = work.path('audio', `${String(manifest.index).padStart(4, '0')}.m4a`);
+    const provenanceFile = `${chapterFile}.json`;
     const progress = (activity: string) => reportProgress({ activity,
       chapterIndex: manifest.index, chapterTitle: chapterTitle(manifest.index),
       completedUnits: encoded, totalUnits: manifests.length, unit: 'chapters encoded',
     });
-    if (fs.existsSync(chapterFile)) {
+    const encodedProvenance = fs.existsSync(provenanceFile) ? JSON.parse(fs.readFileSync(provenanceFile, 'utf8')) as { manifestFingerprint?: string; encoding?: unknown } : undefined;
+    if (fs.existsSync(chapterFile) && encodedProvenance?.manifestFingerprint === manifest.fingerprint && JSON.stringify(encodedProvenance?.encoding) === JSON.stringify(manifest.encoding)) {
       encoded++;
       progress('Reusing encoded chapter');
       continue;
@@ -79,6 +94,9 @@ export async function runAssemble(work: WorkDir, outDir?: string, chapterIndexes
         pendingFile,
       ]);
       fs.renameSync(pendingFile, chapterFile);
+      const pendingProvenance = `${provenanceFile}.tmp`;
+      fs.writeFileSync(pendingProvenance, JSON.stringify({ version: 1, manifestFingerprint: manifest.fingerprint, encoding: manifest.encoding }, null, 2));
+      fs.renameSync(pendingProvenance, provenanceFile);
     } finally {
       fs.rmSync(pendingFile, { force: true });
     }
@@ -95,7 +113,7 @@ export async function runAssemble(work: WorkDir, outDir?: string, chapterIndexes
   const chapterFiles: string[] = [];
   for (const manifest of manifests) {
     throwIfTaskCancelled();
-    const file = work.path('audio', `${String(manifest.index).padStart(2, '0')}.m4a`);
+    const file = work.path('audio', `${String(manifest.index).padStart(4, '0')}.m4a`);
     chapterFiles.push(file);
     const durMs = Math.round(await durationOf(file) * 1000);
     ffmeta += `\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=${cursorMs}\nEND=${cursorMs + durMs}\ntitle=${escapeMeta(chapterTitle(manifest.index))}\n`;
@@ -128,6 +146,7 @@ export async function runAssemble(work: WorkDir, outDir?: string, chapterIndexes
     : '';
   const outFile = path.join(outputDir, `${safeTitle}${selectionLabel}.m4b`);
 
+  const pendingOut = path.join(outputDir, `.${safeTitle}.${process.pid}.${Date.now()}.tmp.m4b`);
   const args = ['-i', bookM4a, '-i', ffmetaFile];
   if (meta.coverFile && fs.existsSync(work.path(meta.coverFile))) {
     args.push('-i', work.path(meta.coverFile));
@@ -135,10 +154,15 @@ export async function runAssemble(work: WorkDir, outDir?: string, chapterIndexes
   } else {
     args.push('-map', '0:a');
   }
-  args.push('-map_metadata', '1', '-c:a', 'copy', '-f', 'mp4', outFile);
+  args.push('-map_metadata', '1', '-c:a', 'copy', '-f', 'mp4', pendingOut);
   reportProgress({ activity: 'Writing M4B with metadata and cover art — waiting for ffmpeg' });
-  await ffmpeg(args);
-  throwIfTaskCancelled();
+  try {
+    await ffmpeg(args);
+    throwIfTaskCancelled();
+    fs.renameSync(pendingOut, outFile);
+  } finally {
+    fs.rmSync(pendingOut, { force: true });
+  }
 
   fs.rmSync(bookM4a);
   reportProgress({ activity: `Audiobook saved: ${outFile}`, phase: 'completed' });

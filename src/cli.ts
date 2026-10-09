@@ -14,13 +14,14 @@ for (const envFile of [
     break;
   }
 }
-import { config, STAGES, type Stage } from './config.js';
+import { config, STAGES, STAGE_DEFINITIONS, type ProviderId, type Stage } from './config.js';
 import { openWorkDir } from './state.js';
 import { checkApiKeys, checkFfmpeg } from './checks.js';
 import { discoverBooks, runStage } from './pipeline/runner.js';
 import { startLocalUi } from './ui/server.js';
 import { defaultVoiceTarget, importVoiceLibrary, loadVoiceLibrary, refreshVoiceLibrary, type VoiceTarget } from './voices/library.js';
 import { sourceFormatForPath, sourceIsAvailable, supportedSourceDescription, type SourceMetadataOverrides } from './source/read.js';
+import { VoiceBindingsSchema } from './types.js';
 
 const program = new Command();
 program
@@ -44,9 +45,6 @@ program
       console.error(`Error: file not found: ${source}`);
       process.exit(1);
     }
-    checkFfmpeg();
-    checkApiKeys();
-
     const work = await openWorkDir(source, opts.work, sourceMetadataFromOptions(opts));
     console.log(`Work directory: ${work.root}`);
 
@@ -67,6 +65,7 @@ program
         console.log(`Review ${work.path('script')} and ${work.path('casting.json')}, then re-run without --dry-run.`);
         return;
       }
+      checkStageDependencies(stage, work);
       const result = await runStage({
         sourcePath: source,
         workRoot: opts.work,
@@ -138,9 +137,8 @@ program
     if (!STAGES.includes(stage as Stage)) throw new Error(`Unknown stage "${stage}". Stages: ${STAGES.join(', ')}`);
     assertSource(source);
     if (!sourceIsAvailable(source)) throw new Error(`file not found: ${source}`);
-    if (stage === 'assemble') checkFfmpeg();
-    if (['analyze', 'chapters', 'script', 'casting'].includes(stage)) checkApiKeys([config.llmProvider]);
-    if (stage === 'synth') checkApiKeys([config.ttsProvider]);
+    const dependencyWork = await openWorkDir(source, opts.work);
+    checkStageDependencies(stage as Stage, dependencyWork);
     const chapters = opts.chapters
       ? String(opts.chapters).split(',').map((value) => Number.parseInt(value.trim(), 10))
       : undefined;
@@ -237,6 +235,18 @@ function sourceMetadataFromOptions(opts: { title?: string; author?: string; lang
   const overrides = Object.fromEntries(Object.entries({ title: opts.title, author: opts.author, language: opts.language })
     .filter(([, value]) => typeof value === 'string' && value.trim())) as SourceMetadataOverrides;
   return Object.keys(overrides).length ? overrides : undefined;
+}
+
+function checkStageDependencies(stage: Stage, work: Awaited<ReturnType<typeof openWorkDir>>): void {
+  const dependency = STAGE_DEFINITIONS[stage].dependency;
+  if (dependency === 'llm') checkApiKeys([config.llmProvider]);
+  if (dependency === 'ffmpeg') checkFfmpeg();
+  if (dependency === 'tts') {
+    if (!fs.existsSync(work.path('voice-bindings.json'))) throw new Error('Voice bindings are missing. Run voices before synthesis.');
+    const provider = VoiceBindingsSchema.parse(work.readJson('voice-bindings.json')).target.provider;
+    if (provider === 'fish') throw new Error('Fish synthesis is not implemented. Choose an OpenAI or OpenRouter binding target.');
+    checkApiKeys([provider as ProviderId]);
+  }
 }
 
 program.parseAsync().catch((err) => {

@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,185 +5,152 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkDir } from '../src/state.js';
-import { runStage, type PipelineEvent } from '../src/pipeline/runner.js';
-import { jsonCall } from '../src/providers/llm/openai.js';
+import { runStage } from '../src/pipeline/runner.js';
 import { getTTSProvider } from '../src/providers/tts/openai.js';
 import { runVoices } from '../src/pipeline/voices.js';
 import { config } from '../src/config.js';
 
-vi.mock('../src/providers/llm/openai.js', () => ({ jsonCall: vi.fn() }));
 vi.mock('../src/providers/tts/openai.js', () => ({ getTTSProvider: vi.fn() }));
-vi.mock('node:child_process', () => ({ execFile: Object.assign(vi.fn(), {
-  [Symbol.for('nodejs.util.promisify.custom')]: vi.fn(),
-}) }));
+vi.mock('node:child_process', () => ({ execFile: Object.assign(vi.fn(), { [Symbol.for('nodejs.util.promisify.custom')]: vi.fn() }) }));
 const command = vi.mocked((execFile as any)[promisify.custom]);
-const llm = vi.mocked(jsonCall);
 const roots: string[] = [];
-afterEach(() => {
-  vi.useRealTimers();
-  vi.resetAllMocks();
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
-});
+afterEach(() => { vi.resetAllMocks(); for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
 
-function fixture() {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lisen-stage-progress-'));
-  roots.push(root);
-  const epubPath = path.join(root, 'book.epub');
-  fs.writeFileSync(epubPath, 'offline fixture');
-  const work = new WorkDir(epubPath, root);
-  const chapters = [0, 1].map((index) => ({ index, title: `Chapter ${index}`, file: `chapters/${index}.md`, words: 2000 }));
+function fixture(indexes = [0]) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lisen-audio-correctness-')); roots.push(root);
+  const source = path.join(root, 'book.epub'); fs.writeFileSync(source, 'fixture');
+  const work = new WorkDir(source, root);
+  const chapters = indexes.map((index) => ({ index, title: `Chapter ${index}`, file: `chapters/${String(index).padStart(4, '0')}.txt`, words: 3, isNav: false }));
   work.writeJson('metadata.json', { title: 'Book', author: 'Author', language: 'en', chapters });
-  const analysis = { isFiction: true, summary: 'Story.', characters: [], author: { name: 'Author', sex: 'unknown', age: 'unknown', country: 'unknown' }, chapters: chapters.map((ch) => ({ index: ch.index, narrate: true })) };
-  work.writeJson('analysis.json', analysis);
-  work.writeJson('characters.json', { version: 1, chapters: [0, 1], characters: [] });
-  work.dir('chapters');
-  for (const ch of chapters) fs.writeFileSync(work.path(ch.file), 'A'.repeat(8000) + '\n\n' + 'B'.repeat(3000));
-  work.writeJson('script/00.json', { index: 0, segments: [{ speaker: 'Alice', text: 'Hello.', confidence: 'high' }] });
-  for (const stage of ['extract', 'analyze', 'chapters', 'list-characters', 'script', 'voices', 'synth'] as const) work.markDone(stage);
-  const events: PipelineEvent[] = [];
-  const options = { epubPath, workRoot: root, outDir: path.join(root, 'out'), onEvent: (event: PipelineEvent) => events.push(event) };
-  return { work, options, events, analysis };
+  work.writeJson('analysis.json', { isFiction: false, summary: '', characters: [], author: { name: 'Author', aliases: [], sex: 'unknown', age: 'unknown', race: 'unknown', class: 'unknown', country: 'unknown', importance: 'minor' }, chapters: indexes.map((index) => ({ index, narrate: true, reason: '' })) });
+  work.writeJson('characters.json', { version: 2, chapters: indexes, characters: [] });
+  work.writeJson('casting.json', { version: 2, narrator: { voiceProfile: { presentation: 'unknown', age: 'unknown', tone: [], language: 'en', accent: 'unspecified' }, instructions: 'Steady.' }, characters: {} });
+  for (const index of indexes) work.writeJson(`script/${String(index).padStart(4, '0')}.json`, { version: 2, format: 'plain-text', index, fingerprint: `script-${index}`, segments: [{ speaker: 'narrator', speakerId: 'narrator', text: `Chapter ${index}.`, confidence: 'high' }] });
+  for (const stage of ['extract', 'analyze', 'chapters', 'booknlp', 'list-characters', 'script', 'casting'] as const) work.markDone(stage);
+  runVoices(work, { provider: 'openai', model: 'gpt-4o-mini-tts' }, path.resolve('library/voices.json'));
+  work.markDone('voices');
+  return { root, source, work };
 }
 
-describe('stage activities', () => {
-  it.each(['analyze', 'casting'] as const)('shows a heartbeat without a fabricated percentage during %s', async (stage) => {
-    const { options, events, analysis } = fixture();
-    let release!: (result: any) => void;
-    llm.mockImplementation(() => new Promise((resolve) => { release = resolve; }));
-    vi.useFakeTimers();
-    const run = runStage({ ...options, stage, rerun: true });
-    await vi.advanceTimersByTimeAsync(config.progressIntervalMs);
-    expect(events.at(-1)).toMatchObject({ type: 'progress', stage, heartbeat: true, progress: {
-      activity: expect.stringContaining('waiting for model response'), elapsedMs: config.progressIntervalMs,
-    } });
-    expect(events.at(-1)?.progress).not.toHaveProperty('totalUnits');
-    release(stage === 'analyze' ? analysis : { version: 2, narrator: {}, characters: {} });
-    await run;
-    expect(events.at(-1)?.type).toBe('completed');
-    expect(vi.getTimerCount()).toBe(0);
-  });
-
-  it('cleans up a failed model activity without claiming completion', async () => {
-    const { options, events } = fixture();
-    let fail!: (error: Error) => void;
-    llm.mockImplementation(() => new Promise((_resolve, reject) => { fail = reject; }));
-    vi.useFakeTimers();
-    const run = runStage({ ...options, stage: 'analyze', rerun: true });
-    const outcome = expect(run).rejects.toThrow('offline failure');
-    await vi.advanceTimersByTimeAsync(config.progressIntervalMs);
-    fail(new Error('offline failure'));
-    await outcome;
-    expect(vi.getTimerCount()).toBe(0);
-    expect(events.some((event) => event.type === 'completed')).toBe(false);
-  });
-
-  it('measures selected chapter text and reports reuse and discovery-only backfills', async () => {
-    const { options, work, events } = fixture();
-    llm.mockResolvedValue({ cleanedText: 'Cleaned.', partialSummary: 'Summary.', characters: [] });
-    await runStage({ ...options, stage: 'chapters', chapterIndexes: [1], rerun: true });
-    expect(events.some((event) => event.progress && 'activity' in event.progress && event.progress.activity.includes('block 2/2') && event.progress.completedUnits === 8000 && event.progress.totalUnits === 11000)).toBe(true);
-    expect(events.filter((event) => event.progress?.phase === 'completed').at(-1)?.progress).toMatchObject({ completedChapters: 1, totalChapters: 1 });
-    expect(events.filter((event) => event.progress).every((event) => event.progress?.chapterIndex === 1)).toBe(true);
-    expect(llm).toHaveBeenCalledTimes(2);
-
-    events.length = 0;
-    await runStage({ ...options, stage: 'chapters', chapterIndexes: [1] });
-    expect(llm).toHaveBeenCalledTimes(2);
-    expect(events.find((event) => event.progress?.phase === 'skipped')?.progress).toMatchObject({ completedChapters: 1 });
-    fs.rmSync(work.path('chapter-characters/01.json'));
-    events.length = 0;
-    await runStage({ ...options, stage: 'chapters', chapterIndexes: [1] });
-    expect(events.some((event) => event.progress && 'activity' in event.progress && event.progress.activity.includes('Discovering speakers in block 2/2'))).toBe(true);
-    expect(fs.readFileSync(work.path('chapters-clean/01.md'), 'utf8')).toBe('Cleaned.\n\nCleaned.');
-  });
-
-  it('counts cached and out-of-order synthesized segments without changing cache inputs', async () => {
-    const { options, work, events } = fixture();
-    work.writeJson('casting.json', { version: 2, narrator: { voiceProfile: {}, instructions: 'Steady.' }, characters: {} });
-    work.writeJson('script/00.json', { index: 0, segments: ['Cached.', 'Second.', 'Third.'].map((text) => ({ speaker: 'narrator', text, confidence: 'high' })) });
-    const bindings = runVoices(work, { provider: 'openai', model: 'gpt-4o-mini-tts' }, path.resolve('library/voices.json'));
-    const binding = bindings.narrator;
-    const hash = crypto.createHash('sha256').update([binding.provider, binding.model, binding.voiceId, 'Steady.', 'Cached.'].join('\x1f')).digest('hex').slice(0, 24);
-    fs.writeFileSync(path.join(work.dir('audio-cache'), hash + '.mp3'), 'paid audio');
-    const pending: Array<(audio: Buffer) => void> = [];
-    const synthesize = vi.fn(() => new Promise<Buffer>((resolve) => pending.push(resolve)));
+describe('synthesis correctness', () => {
+  it('deduplicates identical in-flight requests while retaining repeated manifest occurrences', async () => {
+    const { root, source, work } = fixture();
+    work.writeJson('script/0000.json', { version: 2, format: 'plain-text', index: 0, fingerprint: 'script-0', segments: [
+      { speaker: 'narrator', speakerId: 'narrator', text: 'Same.', confidence: 'high' },
+      { speaker: 'narrator', speakerId: 'narrator', text: 'Same.', confidence: 'high' },
+      { speaker: 'narrator', speakerId: 'narrator', text: 'Different.', confidence: 'high' },
+    ] });
+    const synthesize = vi.fn(async () => Buffer.from('paid'));
     vi.mocked(getTTSProvider).mockReturnValue({ maxChars: 4000, synthesize } as any);
-    vi.useFakeTimers();
-    const run = runStage({ ...options, stage: 'synth', chapterIndexes: [0], rerun: true });
-    await vi.advanceTimersByTimeAsync(0);
+    await runStage({ sourcePath: source, workRoot: root, stage: 'synth', chapterIndexes: [0], rerun: true });
+    const manifest = work.readJson<any>('audio/0000-segments.json');
     expect(synthesize).toHaveBeenCalledTimes(2);
-    expect(events.at(-1)?.progress).toMatchObject({ completedUnits: 1, totalUnits: 3 });
-    pending[1](Buffer.from('third audio'));
+    expect(manifest.segments).toHaveLength(3);
+    expect(manifest.segments[0]).toBe(manifest.segments[1]);
+    expect(manifest).toMatchObject({ version: 2, scriptFingerprint: 'script-0', encoding: { bitrate: config.audioBitrate } });
+  });
+
+  it('blocks only selections affected by an unresolved cross-chapter quotation', async () => {
+    const { root, source, work } = fixture([0, 1]);
+    work.writeJson('unresolved-quotes.json', { version: 1, quotations: [{ id: 'q-boundary', chapterIndex: null, chapterIndexes: [1], text: '“Quote”', context: 'Context' }] });
+    const synthesize = vi.fn(async () => Buffer.from('paid'));
+    vi.mocked(getTTSProvider).mockReturnValue({ maxChars: 4000, synthesize } as any);
+    await expect(runStage({ sourcePath: source, workRoot: root, stage: 'synth', chapterIndexes: [0], rerun: true })).resolves.toMatchObject({ stage: 'synth' });
+    await expect(runStage({ sourcePath: source, workRoot: root, stage: 'synth', chapterIndexes: [1], rerun: true })).rejects.toThrow('unresolved quotation');
+  });
+
+  it('stops queued work and waits for active requests to settle after a failure', async () => {
+    const { root, source, work } = fixture();
+    work.writeJson('script/0000.json', { version: 2, format: 'plain-text', index: 0, fingerprint: 'script-0', segments: ['One.', 'Two.', 'Three.', 'Four.', 'Five.', 'Six.'].map((text) => ({ speaker: 'narrator', speakerId: 'narrator', text, confidence: 'high' })) });
+    vi.useFakeTimers();
+    const finishers: Array<(data: Buffer) => void> = [];
+    const synthesize = vi.fn((request: { text: string }) => request.text === 'One.'
+      ? Promise.reject(new Error('provider failed'))
+      : new Promise<Buffer>((resolve) => { finishers.push(resolve); }));
+    vi.mocked(getTTSProvider).mockReturnValue({ maxChars: 4000, synthesize } as any);
+    const run = runStage({ sourcePath: source, workRoot: root, stage: 'synth', chapterIndexes: [0], rerun: true });
     await vi.advanceTimersByTimeAsync(0);
-    expect(events.at(-1)?.progress).toMatchObject({ completedUnits: 2 });
-    expect(fs.existsSync(work.path('audio/00-segments.json'))).toBe(false);
-    pending[0](Buffer.from('second audio'));
-    await run;
-    expect(work.readJson<any>('audio/00-segments.json').segments[0]).toBe(hash);
-    expect(fs.readFileSync(work.path('audio-cache', hash + '.mp3'), 'utf8')).toBe('paid audio');
-    expect(events.filter((event) => event.progress).at(-1)?.progress).toMatchObject({ completedUnits: 3, totalUnits: 3, completedChapters: 1, totalChapters: 1 });
-    expect(vi.getTimerCount()).toBe(0);
+    await vi.advanceTimersByTimeAsync(14_000);
+    let settled = false; void run.catch(() => { settled = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    for (const finish of finishers) finish(Buffer.from('completed paid output'));
+    await expect(run).rejects.toThrow('provider failed');
+    expect(synthesize.mock.calls.map(([request]) => request.text)).not.toContain('Five.');
+    expect(synthesize.mock.calls.map(([request]) => request.text)).not.toContain('Six.');
+    expect(fs.existsSync(work.path('audio/0000-segments.json'))).toBe(false);
+    vi.useRealTimers();
+  });
+
+  it('aborts and settles every active request before cancellation releases the stage', async () => {
+    const { root, source, work } = fixture();
+    work.writeJson('script/0000.json', { version: 2, format: 'plain-text', index: 0, fingerprint: 'script-0', segments: ['One.', 'Two.', 'Three.', 'Four.', 'Five.'].map((text) => ({ speaker: 'narrator', speakerId: 'narrator', text, confidence: 'high' })) });
+    const active = new Set<string>();
+    let allStarted!: () => void;
+    const started = new Promise<void>((resolve) => { allStarted = resolve; });
+    const synthesize = vi.fn((request: { text: string; signal: AbortSignal }) => new Promise<Buffer>((_resolve, reject) => {
+      active.add(request.text);
+      if (active.size === config.ttsConcurrency) allStarted();
+      request.signal.addEventListener('abort', () => {
+        active.delete(request.text);
+        reject(new Error(`aborted ${request.text}`));
+      }, { once: true });
+    }));
+    vi.mocked(getTTSProvider).mockReturnValue({ maxChars: 4000, synthesize } as any);
+    const controller = new AbortController();
+    const run = runStage({ sourcePath: source, workRoot: root, stage: 'synth', chapterIndexes: [0], rerun: true, signal: controller.signal });
+    await started;
+    controller.abort();
+    await expect(run).rejects.toThrow('aborted');
+    expect(active.size).toBe(0);
+    expect(synthesize).toHaveBeenCalledTimes(config.ttsConcurrency);
+    expect(fs.existsSync(work.path('audio/0000-segments.json'))).toBe(false);
   });
 });
 
-describe('asynchronous assembly progress', () => {
-  it('keeps reporting during encoding, reuses chapters, then reports joining and export', async () => {
-    const { options, work, events } = fixture();
-    work.writeJson('audio/00-segments.json', { index: 0, segments: ['cached'] });
-    work.writeJson('audio/01-segments.json', { index: 1, segments: ['new'] });
-    fs.writeFileSync(work.path('audio/00.m4a'), 'existing encoding');
-    let release!: () => void;
-    command.mockImplementation(async (bin: string, args: string[]) => {
-      if (bin === 'ffprobe') return { stdout: '1.25\n', stderr: '' };
-      const output = args.at(-1)!;
-      fs.writeFileSync(output, 'encoded audio');
-      if (output.endsWith('.tmp.m4a')) await new Promise<void>((resolve) => { release = resolve; });
-      return { stdout: '', stderr: '' };
-    });
-    vi.useFakeTimers();
-    const run = runStage({ ...options, stage: 'assemble' });
-    await vi.advanceTimersByTimeAsync(config.progressIntervalMs);
-    expect(events.at(-1)).toMatchObject({ heartbeat: true, progress: { activity: expect.stringContaining('waiting for ffmpeg'), completedUnits: 1, totalUnits: 2 } });
-    release();
-    const result = await run;
-    expect(fs.existsSync(result.output!)).toBe(true);
-    expect(fs.readFileSync(work.path('audio/00.m4a'), 'utf8')).toBe('existing encoding');
-    expect(fs.readFileSync(work.path('audio/ffmetadata.txt'), 'utf8')).toContain('END=2500');
-    const joining = events.find((event) => event.progress && 'activity' in event.progress && event.progress.activity.startsWith('Joining'));
-    expect(joining?.progress).not.toHaveProperty('totalUnits');
-    expect(new WorkDir(options.epubPath, options.workRoot).isDone('assemble')).toBe(true);
-    expect(vi.getTimerCount()).toBe(0);
-  });
+describe('assembly freshness and publication', () => {
+  function synthesized(indexes = [0]) {
+    const data = fixture(indexes);
+    for (const index of indexes) {
+      fs.writeFileSync(path.join(data.work.dir('audio-cache'), `hash-${index}.mp3`), 'paid');
+      data.work.writeJson(`audio/${String(index).padStart(4, '0')}-segments.json`, { version: 2, index, segments: [`hash-${index}`], scriptFingerprint: `script-${index}`, fingerprint: `manifest-${index}`, encoding: { codec: 'aac', bitrate: config.audioBitrate, sampleRate: 44100, channels: 1 } });
+    }
+    data.work.markChaptersDone('synth', indexes, indexes);
+    return data;
+  }
 
-  it('saves the default assembled M4B in the book work folder', async () => {
-    const { options, work } = fixture();
-    work.writeJson('audio/00-segments.json', { index: 0, segments: ['cached'] });
-    fs.writeFileSync(work.path('audio/00.m4a'), 'existing encoding');
+  it('sorts authoritative chapters numerically and re-encodes stale chapter files', async () => {
+    const { root, source, work } = synthesized([2, 11, 100]);
+    fs.writeFileSync(work.path('audio/0011.m4a'), 'stale');
+    work.writeJson('audio/0011.m4a.json', { manifestFingerprint: 'old', encoding: {} });
+    const encoded: string[] = [];
     command.mockImplementation(async (bin: string, args: string[]) => {
       if (bin === 'ffprobe') return { stdout: '1\n', stderr: '' };
-      fs.writeFileSync(args.at(-1)!, 'assembled audio');
-      return { stdout: '', stderr: '' };
+      const output = args.at(-1)!; encoded.push(output); fs.writeFileSync(output, 'audio'); return { stdout: '', stderr: '' };
     });
-
-    const { outDir: _outDir, ...defaultOptions } = options;
-    const result = await runStage({ ...defaultOptions, stage: 'assemble' });
-
-    expect(result.output).toBe(work.path('Book.m4b'));
-    expect(fs.existsSync(work.path('Book.m4b'))).toBe(true);
+    await runStage({ sourcePath: source, workRoot: root, stage: 'assemble' });
+    expect(encoded.some((file) => file.endsWith('0011.m4a.tmp.m4a'))).toBe(true);
+    const metadata = fs.readFileSync(work.path('audio/ffmetadata.txt'), 'utf8');
+    expect([...metadata.matchAll(/title=Chapter (\d+)/g)].map((match) => Number(match[1]))).toEqual([2, 11, 100]);
   });
 
-  it('does not publish a failed chapter encode or complete the stage', async () => {
-    const { options, work, events } = fixture();
-    work.writeJson('audio/00-segments.json', { index: 0, segments: ['paid'] });
-    fs.writeFileSync(path.join(work.dir('audio-cache'), 'paid.mp3'), 'paid audio');
-    command.mockImplementation(async (_bin: string, args: string[]) => {
-      fs.writeFileSync(args.at(-1)!, 'partial encoding');
-      throw new Error('ffmpeg failed');
+  it('rejects a selected stale chapter outside the current narration plan', async () => {
+    const { root, source, work } = synthesized([0]);
+    work.writeJson('script/0005.json', { version: 2, format: 'plain-text', index: 5, fingerprint: 'stale-script', segments: [{ speaker: 'narrator', speakerId: 'narrator', text: 'Stale.', confidence: 'high' }] });
+    work.writeJson('audio/0005-segments.json', { version: 2, index: 5, segments: [], scriptFingerprint: 'stale-script', fingerprint: 'stale-manifest', encoding: { codec: 'aac', bitrate: config.audioBitrate, sampleRate: 44100, channels: 1 } });
+    await expect(runStage({ sourcePath: source, workRoot: root, stage: 'assemble', chapterIndexes: [5] })).rejects.toThrow('current narration plan');
+  });
+
+  it('retains a prior successful export when final muxing fails', async () => {
+    const { root, source, work } = synthesized();
+    const existing = work.path('Book.m4b'); fs.writeFileSync(existing, 'previous success');
+    command.mockImplementation(async (bin: string, args: string[]) => {
+      if (bin === 'ffprobe') return { stdout: '1\n', stderr: '' };
+      const output = args.at(-1)!; fs.writeFileSync(output, 'partial');
+      if (output.endsWith('.tmp.m4b')) throw new Error('mux failed');
+      return { stdout: '', stderr: '' };
     });
-    await expect(runStage({ ...options, stage: 'assemble', chapterIndexes: [0] })).rejects.toThrow('ffmpeg failed');
-    expect(fs.existsSync(work.path('audio/00.m4a'))).toBe(false);
-    expect(fs.existsSync(work.path('audio/00.m4a.tmp.m4a'))).toBe(false);
-    expect(fs.existsSync(work.path('audio-cache/paid.mp3'))).toBe(true);
-    expect(events.some((event) => event.type === 'completed')).toBe(false);
+    await expect(runStage({ sourcePath: source, workRoot: root, stage: 'assemble' })).rejects.toThrow('mux failed');
+    expect(fs.readFileSync(existing, 'utf8')).toBe('previous success');
   });
 });

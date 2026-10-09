@@ -66,15 +66,17 @@ ${sampled}`,
   analysis.chapters = meta.chapters.map((ch) => {
     const plan = planByIndex.get(ch.index) ?? { index: ch.index, narrate: true, reason: 'default' };
     if (ch.isNav) return { index: ch.index, narrate: false, reason: 'nav/TOC document' };
+    // Structural story headings win over broad keyword rules. For example,
+    // "Chapter 12: Acknowledgments" is still a body chapter.
+    if (/^(chapter|prologue|epilogue|part|book)\b/i.test(ch.title)) {
+      return { index: ch.index, narrate: true, reason: `structural story chapter: "${ch.title}"` };
+    }
     if (SKIP_TITLE_RE.test(ch.title)) {
       return { index: ch.index, narrate: false, reason: `title matches skip list: "${ch.title}"` };
     }
     if (ch.words < 10) return { index: ch.index, narrate: false, reason: 'empty chapter' };
     // Rescue false skips: a title like "Chapter XII" is story content no matter
     // what the LLM decided.
-    if (!plan.narrate && /^(chapter|prologue|epilogue|part|book)\b/i.test(ch.title)) {
-      return { index: ch.index, narrate: true, reason: `title looks like a story chapter: "${ch.title}"` };
-    }
     return plan;
   });
 

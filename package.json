@@ -1,7 +1,7 @@
 {
   "name": "lisen-epub-convertor",
   "version": "0.1.0",
-  "description": "Converts an EPUB into a multi-voice M4B audiobook",
+  "description": "Converts EPUB, PDF, HTML, Markdown, and text sources into multi-voice M4B audiobooks",
   "type": "module",
   "bin": {
     "lisen": "./dist/cli.js"
@@ -13,7 +13,7 @@
     "test:watch": "vitest"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   },
   "author": "Binny V A",
   "license": "ISC",

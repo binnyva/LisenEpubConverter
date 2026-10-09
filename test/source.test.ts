@@ -51,6 +51,16 @@ describe('source readers', () => {
     expect(parsed).toMatchObject({ format: 'markdown', title: 'Moonlit Story', author: 'Ada Writer', language: 'pt-BR' });
     expect(parsed.chapters).toHaveLength(1);
     expect(parsed.chapters[0].markdown).toContain('A quiet story.');
+    expect(parsed.chapters[0].text).toBe('Moonlit Story\n\nA quiet story.');
+    expect(parsed.chapters[0].text).not.toContain('#');
+  });
+
+  it('supports UTF-8 plain text as a canonical source', async () => {
+    const root = tempRoot(); const source = path.join(root, 'story.txt');
+    fs.writeFileSync(source, '\uFEFF“Olá,” said Ana.\n\n😀 A second paragraph.');
+    const parsed = await readSource(source, { language: 'en-GB', author: 'Writer' });
+    expect(parsed).toMatchObject({ format: 'text', title: 'story', author: 'Writer', language: 'en-GB' });
+    expect(parsed.chapters[0].text).toBe('“Olá,” said Ana.\n\n😀 A second paragraph.');
   });
 
   it('uses article content and document metadata from HTML', async () => {
@@ -107,7 +117,7 @@ describe('source readers', () => {
     expect(markdownWork.root).not.toBe(pdfWork.root);
     const metadata = await runExtract(markdown, markdownWork, { language: 'en-GB' });
     expect(metadata.language).toBe('en-GB');
-    expect(sourceFormatForPath(path.join(root, 'story.txt'))).toBeUndefined();
+    expect(sourceFormatForPath(path.join(root, 'story.txt'))).toBe('text');
   });
 
   it('names new work folders from the document title, including title overrides', async () => {

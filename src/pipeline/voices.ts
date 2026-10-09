@@ -2,12 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import type { WorkDir } from '../state.js';
-import { CastingSchema, ChapterScriptSchema, VoiceBindingsSchema, type BookMetadata, type CastSpeaker, type Casting, type VoiceBinding, type VoiceBindings } from '../types.js';
+import { CastingSchema, CharacterRegistrySchema, ChapterScriptSchema, ManualSpeakerSettingsSchema, VoiceBindingsSchema, type BookMetadata, type CastSpeaker, type Casting, type VoiceBinding, type VoiceBindings } from '../types.js';
 import { config } from '../config.js';
 import { defaultVoiceTarget, loadVoiceLibrary, modelId, type LibraryVoice, type VoiceTarget } from '../voices/library.js';
 import { reportProgress } from '../util/progress.js';
 
-/** Stage 7: apply one compatible library model to a provider-neutral cast. */
+/** Stage 8: apply one compatible library model to a provider-neutral cast. */
 export function runVoices(work: WorkDir, target = defaultVoiceTarget(), libraryFile = config.voiceLibraryFile): VoiceBindings {
   reportProgress({ activity: 'Loading voice catalogue and validating scripted speakers' });
   const library = loadVoiceLibrary(libraryFile);
@@ -25,18 +25,23 @@ export function runVoices(work: WorkDir, target = defaultVoiceTarget(), libraryF
     ? work.readJson<BookMetadata>('metadata.json').language
     : undefined;
 
-  const existing = fs.existsSync(work.path('voice-bindings.json'))
-    ? VoiceBindingsSchema.parse(work.readJson('voice-bindings.json'))
+  let existing = fs.existsSync(work.path('voice-bindings.json'))
+    ? migrateBindingKeys(work, VoiceBindingsSchema.parse(work.readJson('voice-bindings.json')))
     : undefined;
+  const manual = fs.existsSync(work.path('manual-speaker-settings.json'))
+    ? ManualSpeakerSettingsSchema.parse(work.readJson('manual-speaker-settings.json')) : undefined;
+  if (manual) {
+    if (existing) existing = { ...existing, narrator: manual.voiceBindings.narrator ?? existing.narrator, characters: { ...existing.characters, ...manual.voiceBindings } };
+  }
   const used = new Set<string>();
   const totalSpeakers = Object.keys(casting.characters).length + 1;
   reportProgress({ activity: 'Matching narrator and character voices', completedUnits: 0, totalUnits: totalSpeakers, unit: 'speakers matched' });
-  const narrator = chooseBinding(casting.narrator, existing?.narrator, candidates, target, model.supportsInstructions, used, bookLanguage);
+  const narrator = chooseBinding(casting.narrator, manual?.voiceBindings.narrator ?? existing?.narrator, candidates, target, model.supportsInstructions, used, bookLanguage);
   used.add(narrator.libraryVoiceId);
   reportProgress({ activity: 'Matched narrator voice', completedUnits: 1, totalUnits: totalSpeakers, unit: 'speakers matched' });
   const characters: Record<string, VoiceBinding> = {};
   for (const [name, speaker] of Object.entries(casting.characters)) {
-    characters[name] = chooseBinding(speaker, existing?.characters[name], candidates, target, model.supportsInstructions, used, bookLanguage);
+    characters[name] = chooseBinding(speaker, manual?.voiceBindings[name] ?? existing?.characters[name], candidates, target, model.supportsInstructions, used, bookLanguage);
     used.add(characters[name].libraryVoiceId);
     reportProgress({ activity: `Matched voice for ${name}`, completedUnits: Object.keys(characters).length + 1, totalUnits: totalSpeakers, unit: 'speakers matched' });
   }
@@ -57,7 +62,7 @@ export function validateVoiceBindings(work: WorkDir): VoiceBindings {
   if (!fs.existsSync(work.path('voice-bindings.json'))) {
     throw new Error('Voice bindings are missing. Run the voices stage before synthesis.');
   }
-  const bindings = VoiceBindingsSchema.parse(work.readJson('voice-bindings.json'));
+  const bindings = migrateBindingKeys(work, VoiceBindingsSchema.parse(work.readJson('voice-bindings.json')));
   const casting = readCasting(work);
   const library = loadVoiceLibrary(bindings.libraryFile);
   const model = library.models.find((entry) => entry.id === modelId(bindings.target));
@@ -85,7 +90,8 @@ function validateScriptSpeakers(work: WorkDir, casting: Casting): void {
   for (const file of fs.readdirSync(work.path('script')).filter((file) => file.endsWith('.json'))) {
     const script = ChapterScriptSchema.parse(work.readJson(`script/${file}`));
     for (const segment of script.segments) {
-      if (segment.speaker !== 'narrator' && !Object.hasOwn(casting.characters, segment.speaker)) missing.add(segment.speaker);
+      const key = segment.speakerId && segment.speakerId !== 'narrator' ? segment.speakerId : segment.speaker;
+      if (segment.speaker !== 'narrator' && !Object.hasOwn(casting.characters, key)) missing.add(`${segment.speaker} (${key})`);
     }
   }
   if (missing.size) throw new Error(`Add missing scripted speakers to casting.json before applying voices: ${[...missing].join(', ')}.`);
@@ -105,7 +111,26 @@ const LegacyCastingSchema = z.object({
 function readCasting(work: WorkDir): Casting {
   const raw = work.readJson<unknown>('casting.json');
   const modern = CastingSchema.safeParse(raw);
-  if (modern.success) return modern.data;
+  if (modern.success) {
+    if (!fs.existsSync(work.path('characters.json'))) return modern.data;
+    const registry = CharacterRegistrySchema.parse(work.readJson('characters.json'));
+    const characters: Casting['characters'] = {};
+    let migrated = false;
+    for (const character of registry.characters) {
+      const value = modern.data.characters[character.id] ?? modern.data.characters[character.name];
+      if (value) characters[character.id] = value;
+      if (!modern.data.characters[character.id] && modern.data.characters[character.name]) migrated = true;
+    }
+    for (const [key, value] of Object.entries(modern.data.characters)) {
+      if (!registry.characters.some((character) => character.id === key || character.name === key)) characters[key] = value;
+    }
+    if (!migrated) return modern.data;
+    const backup = work.path('casting.name-keyed.json');
+    if (!fs.existsSync(backup)) fs.copyFileSync(work.path('casting.json'), backup);
+    const casting = { ...modern.data, characters };
+    work.writeJson('casting.json', casting);
+    return casting;
+  }
   const legacy = LegacyCastingSchema.safeParse(raw);
   if (!legacy.success) throw new Error('casting.json does not match the current or legacy casting format. Re-run the casting stage.');
   const backup = work.path('casting.legacy.json');
@@ -122,6 +147,22 @@ function readCasting(work: WorkDir): Casting {
   work.writeJson('casting.json', casting);
   console.warn(`  Migrated legacy casting.json; original saved as ${backup}. Run voices to choose a recorded provider/model target.`);
   return casting;
+}
+
+function migrateBindingKeys(work: WorkDir, bindings: VoiceBindings): VoiceBindings {
+  if (!fs.existsSync(work.path('characters.json'))) return bindings;
+  const registry = CharacterRegistrySchema.parse(work.readJson('characters.json'));
+  let changed = false;
+  const characters: VoiceBindings['characters'] = {};
+  for (const character of registry.characters) {
+    const value = bindings.characters[character.id] ?? bindings.characters[character.name];
+    if (value) characters[character.id] = value;
+    if (!bindings.characters[character.id] && bindings.characters[character.name]) changed = true;
+  }
+  if (!changed) return bindings;
+  const migrated = { ...bindings, characters };
+  work.writeJson('voice-bindings.json', migrated);
+  return migrated;
 }
 
 function chooseBinding(

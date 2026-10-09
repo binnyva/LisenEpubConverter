@@ -4,9 +4,9 @@ import crypto from 'node:crypto';
 import * as cheerio from 'cheerio';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { parseEpub } from '../epub/epub.js';
-import { htmlToMarkdown } from '../epub/markdown.js';
+import { htmlToPlainText, markdownToPlainText, normalizePlainText } from '../epub/markdown.js';
 
-export const SOURCE_FORMATS = ['epub', 'pdf', 'html', 'markdown'] as const;
+export const SOURCE_FORMATS = ['epub', 'pdf', 'html', 'markdown', 'text'] as const;
 export type SourceFormat = typeof SOURCE_FORMATS[number];
 
 export interface SourceMetadataOverrides {
@@ -18,6 +18,8 @@ export interface SourceMetadataOverrides {
 export interface SourceChapter {
   id: string;
   title: string;
+  text: string;
+  /** @deprecated Compatibility alias; content is plain text, not Markdown. */
   markdown: string;
   isNav: boolean;
 }
@@ -42,12 +44,13 @@ export function sourceFormatForPath(sourcePath: string): SourceFormat | undefine
     case '.htm': return 'html';
     case '.md':
     case '.markdown': return 'markdown';
+    case '.txt': return 'text';
     default: return undefined;
   }
 }
 
 export function supportedSourceDescription(): string {
-  return 'an http(s) URL, .epub, .pdf, .html, .htm, .md, or .markdown';
+  return 'an http(s) URL, .epub, .pdf, .html, .htm, .md, .markdown, or .txt';
 }
 
 export function isRemoteSource(source: string): boolean {
@@ -72,6 +75,7 @@ export async function readSource(sourcePath: string, overrides: SourceMetadataOv
     pdf: () => readPdf(sourcePath),
     html: () => isRemoteSource(sourcePath) ? readRemoteHtml(sourcePath) : readHtml(sourcePath),
     markdown: () => readMarkdown(sourcePath),
+    text: () => readText(sourcePath),
   } satisfies Record<SourceFormat, () => Promise<ParsedSource>>)[format]();
 
   return {
@@ -92,7 +96,8 @@ async function readEpub(sourcePath: string): Promise<ParsedSource> {
     chapters: epub.spine.map((item, index) => ({
       id: item.id,
       title: epub.tocTitles.get(item.href) || firstHeading(item.html) || `Section ${index + 1}`,
-      markdown: htmlToMarkdown(item.html),
+      text: htmlToPlainText(item.html),
+      markdown: htmlToPlainText(item.html),
       isNav: item.isNav,
     })),
     cover: epub.cover,
@@ -132,7 +137,7 @@ function parseHtml(sourcePath: string, html: string): ParsedSource {
   const language = $('html').attr('lang')?.trim() || 'en';
   return {
     format: 'html', title, author, language,
-    chapters: [{ id: 'source', title, markdown: htmlToMarkdown(content), isNav: false }],
+    chapters: [{ id: 'source', title, text: htmlToPlainText(content), markdown: htmlToPlainText(content), isNav: false }],
   };
 }
 
@@ -174,8 +179,16 @@ async function readMarkdown(sourcePath: string): Promise<ParsedSource> {
     title,
     author: attributes.author || 'Unknown',
     language: attributes.language || attributes.lang || 'en',
-    chapters: [{ id: 'source', title, markdown: body.trim(), isNav: false }],
+    chapters: [{ id: 'source', title, text: markdownToPlainText(body), markdown: markdownToPlainText(body), isNav: false }],
   };
+}
+
+async function readText(sourcePath: string): Promise<ParsedSource> {
+  const raw = fs.readFileSync(sourcePath, 'utf8').replace(/^\uFEFF/, '');
+  const text = normalizePlainText(raw);
+  if (!text) throw new Error('Text source is empty.');
+  const title = titleFromPath(sourcePath);
+  return { format: 'text', title, author: 'Unknown', language: 'en', chapters: [{ id: 'source', title, text, markdown: text, isNav: false }] };
 }
 
 async function readPdf(sourcePath: string): Promise<ParsedSource> {
@@ -206,15 +219,15 @@ async function readPdf(sourcePath: string): Promise<ParsedSource> {
       page.cleanup();
       pages.push(lines.join('\n'));
     }
-    const markdown = normalizePdfText(pages.join('\n\n'));
-    if (markdown.replace(/\s/g, '').length < 20) {
+    const text = normalizePdfText(pages.join('\n\n'));
+    if (text.replace(/\s/g, '').length < 20) {
       throw new Error('This PDF has no readable text. It may be scanned or image-only; run OCR first, then use the OCRed PDF or a Markdown/text export.');
     }
     const title = stringMetadata(metadata.Title) || titleFromPath(sourcePath);
     const author = stringMetadata(metadata.Author) || 'Unknown';
     return {
       format: 'pdf', title, author, language: 'en',
-      chapters: [{ id: 'source', title, markdown, isNav: false }],
+      chapters: [{ id: 'source', title, text, markdown: text, isNav: false }],
     };
   } finally {
     await document.cleanup();
@@ -225,7 +238,10 @@ function normalizePdfText(text: string): string {
   return text
     .replace(/([\p{L}\p{N}])-[ \t]*\n[ \t]*([\p{Ll}])/gu, '$1$2')
     .replace(/[^\S\r\n]+/g, ' ')
-    .replace(/(?<!\n)\n(?!\n)/g, ' ')
+    // Preserve explicit PDF line groups as paragraphs. Join a line only when
+    // it clearly continues a sentence; quoted dialogue on its own line stays
+    // a separate paragraph for BookNLP.
+    .replace(/([^.!?:;”"'’—-])\n(?=[\p{Ll}\p{N}])/gu, '$1 ')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
