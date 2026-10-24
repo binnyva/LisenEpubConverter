@@ -4,6 +4,8 @@ import { config } from '../config.js';
 import { AnalysisSchema, type Analysis, type BookMetadata } from '../types.js';
 import type { WorkDir } from '../state.js';
 import { reportProgress } from '../util/progress.js';
+import { normalizePlainText } from '../epub/markdown.js';
+import { hasNarratableText } from '../util/text.js';
 
 const SKIP_TITLE_RE =
   /\b(contents|table of contents|acknowledg|thanks|appendix|index|copyright|license|colophon|dedication|about the author|also by|praise for|title page|other books|project gutenberg)\b/i;
@@ -65,6 +67,8 @@ ${sampled}`,
   const planByIndex = new Map(analysis.chapters.map((c) => [c.index, c]));
   analysis.chapters = meta.chapters.map((ch) => {
     const plan = planByIndex.get(ch.index) ?? { index: ch.index, narrate: true, reason: 'default' };
+    const chapterText = normalizePlainText(fs.readFileSync(work.path(ch.file), 'utf8'));
+    if (!hasNarratableText(chapterText)) return { index: ch.index, narrate: false, reason: 'empty chapter' };
     if (ch.isNav) return { index: ch.index, narrate: false, reason: 'nav/TOC document' };
     // Structural story headings win over broad keyword rules. For example,
     // "Chapter 12: Acknowledgments" is still a body chapter.

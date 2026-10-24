@@ -3,6 +3,7 @@ import type { WorkDir } from '../state.js';
 import type { Analysis, BookMetadata, ChapterSummaries } from '../types.js';
 import { reportProgress, type ChapterProgress } from '../util/progress.js';
 import { normalizePlainText } from '../epub/markdown.js';
+import { hasNarratableText } from '../util/text.js';
 
 const SUMMARIES_FILE = 'chapter-summaries.json';
 
@@ -26,6 +27,7 @@ export async function runChapters(work: WorkDir, chapterIndexes?: number[]): Pro
     .filter((ch) => !chapterIndexes || chapterIndexes.includes(ch.index));
 
   let completedChapters = 0;
+  let planChanged = false;
   for (const ch of narratable) {
     const source = fs.readFileSync(work.path(ch.file), 'utf8');
     const text = normalizePlainText(source);
@@ -34,8 +36,18 @@ export async function runChapters(work: WorkDir, chapterIndexes?: number[]): Pro
       completedChapters, totalChapters: narratable.length,
       completedUnits: text.length, totalUnits: text.length, unit: 'characters prepared',
     });
-    if (!text || !/[\p{L}\p{N}]/u.test(text)) throw new Error(`Narratable chapter ${ch.index + 1} has no speakable text.`);
     const cleanFile = `chapters-clean/${String(ch.index).padStart(4, '0')}.txt`;
+    if (!hasNarratableText(text)) {
+      const plan = analysis.chapters.find((entry) => entry.index === ch.index)!;
+      plan.narrate = false;
+      plan.reason = 'empty chapter';
+      planChanged = true;
+      fs.rmSync(work.path(cleanFile), { force: true });
+      delete summaries[ch.index];
+      completedChapters++;
+      progress('Skipping chapter with no speakable text', 'skipped');
+      continue;
+    }
     const existing = fs.existsSync(work.path(cleanFile)) ? fs.readFileSync(work.path(cleanFile), 'utf8') : undefined;
     if (existing === text) {
       completedChapters++;
@@ -48,5 +60,6 @@ export async function runChapters(work: WorkDir, chapterIndexes?: number[]): Pro
     completedChapters++;
     progress('Chapter plain text prepared', 'completed');
   }
+  if (planChanged) work.writeJson('analysis.json', analysis);
   work.writeJson(SUMMARIES_FILE, summaries);
 }
