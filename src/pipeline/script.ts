@@ -3,7 +3,8 @@ import { z } from 'zod';
 import { jsonCall } from '../providers/llm/openai.js';
 import { config } from '../config.js';
 import { markdownToSpeakable } from '../epub/markdown.js';
-import { condenseSummary, hasNarratableText, normalizeNonBreakingSpaces, splitIntoBlocks } from '../util/text.js';
+import { condenseSummary, hasNarratableText, isSceneBreak, normalizeNonBreakingSpaces, paragraphsOf, splitIntoBlocks } from '../util/text.js';
+import { restoreSceneBreaks } from './cleanup.js';
 import { reportWarning } from '../util/warnings.js';
 import type { WorkDir } from '../state.js';
 import { characterScopeHash, legacyCharacterRegistryHash, readCharacterRegistry } from './list-characters.js';
@@ -19,16 +20,19 @@ import {
   type ChapterSummaries,
   type ScriptSegment,
   type PersonProfile,
+  type ExtractedChapter,
 } from '../types.js';
 
-const SegmentsSchema = z.object({ segments: z.array(ScriptSegmentSchema) });
+/** A model only ever returns speech; pauses are inserted deterministically. */
+const SpeechSegmentSchema = ScriptSegmentSchema.omit({ kind: true, pauseMs: true });
+const SegmentsSchema = z.object({ segments: z.array(SpeechSegmentSchema) });
 const VerifySchema = z.object({
   attributions: z.array(z.object({ id: z.number(), speaker: z.string() })),
 });
 const NarrationRepairSchema = z.object({
   repairs: z.array(z.object({
     id: z.number().int().nonnegative(),
-    segments: z.array(ScriptSegmentSchema).min(1),
+    segments: z.array(SpeechSegmentSchema).min(1),
   })),
 });
 
@@ -382,14 +386,74 @@ For every supplied id, return a complete ordered replacement sequence for that s
   return split;
 }
 
-/** Remove layout-only segments before they can reach speaker attribution or TTS. */
+/**
+ * Remove layout-only segments before they can reach speaker attribution or
+ * TTS. A scene-break pause has no narratable text by definition and is the one
+ * segment kind that is kept: it is silence, not something to be spoken.
+ */
 export function filterNarratableSegments(segments: ScriptSegment[]): ScriptSegment[] {
   return segments
     .map((segment) => {
       const text = normalizeNonBreakingSpaces(segment.text);
       return text === segment.text ? segment : { ...segment, text };
     })
-    .filter((segment) => hasNarratableText(segment.text));
+    .filter((segment) => segment.kind === 'pause' || hasNarratableText(segment.text));
+}
+
+/**
+ * The silence a scene break becomes. The divider is kept as the segment text
+ * so the script still shows where the break is and what marked it, and the
+ * length is recorded so a hand edit can lengthen one break on its own.
+ */
+export function pauseSegment(divider: string): ScriptSegment {
+  return {
+    speaker: 'narrator',
+    text: divider.trim(),
+    confidence: 'high',
+    kind: 'pause',
+    pauseMs: config.sceneBreakPauseMs,
+  };
+}
+
+/**
+ * One segment as prompt context. A pause is shown as a marker rather than its
+ * divider, so the model reads it as a change of scene and never as text to
+ * copy into a segment of its own.
+ */
+function contextLine(segment: ScriptSegment, chars = 120): string {
+  return segment.kind === 'pause' ? '[scene break]' : `[${segment.speaker}] ${segment.text.slice(0, chars)}`;
+}
+
+/** One attribution request's text, and the scene break that follows it. */
+export interface AttributionBlock {
+  text: string;
+  sceneBreak?: string;
+}
+
+/**
+ * Chapter text as attribution blocks, cut at scene breaks before size, so a
+ * divider never lands in the middle of a block and the model never sees one.
+ * Each block records the divider that follows it, which becomes a pause.
+ */
+export function attributionBlocks(text: string, maxChars: number): AttributionBlock[] {
+  const blocks: AttributionBlock[] = [];
+  let section: string[] = [];
+  const flush = (sceneBreak?: string): void => {
+    const body = section.join('\n\n');
+    section = [];
+    const pieces = body.trim() ? splitIntoBlocks(body, maxChars) : [];
+    for (const [i, piece] of pieces.entries()) {
+      blocks.push(i === pieces.length - 1 && sceneBreak ? { text: piece, sceneBreak } : { text: piece });
+    }
+    // A divider with nothing before it still marks a break.
+    if (sceneBreak && !pieces.length) blocks.push({ text: '', sceneBreak });
+  };
+  for (const paragraph of paragraphsOf(text)) {
+    if (isSceneBreak(paragraph)) flush(paragraph);
+    else section.push(paragraph);
+  }
+  flush();
+  return blocks;
 }
 
 /**
@@ -433,6 +497,26 @@ export function withChapterTitle(segments: ScriptSegment[], title?: string): Scr
   return comparable(narratable[0]?.text ?? '') === comparable(title)
     ? [chapterTitle, ...narratable.slice(1)]
     : [chapterTitle, ...narratable];
+}
+
+/**
+ * The cleaned chapter, with scene breaks put back when it was cleaned before
+ * they were kept. Chapters is normally complete by the time Script runs, so
+ * the repair belongs here, where the breaks are first needed; the repaired
+ * text is saved so later runs and the UI read it directly.
+ */
+function readCleanedChapter(work: WorkDir, ch: ExtractedChapter): string {
+  const cleanFile = `chapters-clean/${String(ch.index).padStart(2, '0')}.md`;
+  const cleaned = fs.readFileSync(work.path(cleanFile), 'utf8');
+  // A chapter whose extracted markdown is gone has nothing to recover from.
+  if (!ch.file || !fs.existsSync(work.path(ch.file))) return cleaned;
+  const scenes = restoreSceneBreaks(fs.readFileSync(work.path(ch.file), 'utf8'), cleaned);
+  if (scenes.missed) {
+    reportWarning(`Chapter ${ch.index + 1}: could not place ${scenes.missed} scene break(s) in the cleaned text; rerun Chapters for this chapter to recover them.`);
+  }
+  if (!scenes.restored) return cleaned;
+  fs.writeFileSync(work.path(cleanFile), scenes.text);
+  return scenes.text;
 }
 
 /**
@@ -500,12 +584,14 @@ export async function runScript(
         // Accept an unchanged one and upgrade it rather than re-attributing.
         const legacy = existing.characterScopeHash === undefined;
         if (legacy ? existing.characterRegistryHash === legacyHash : existing.characterScopeHash === scopeHash) {
-          const text = fs.readFileSync(
-            work.path(`chapters-clean/${String(ch.index).padStart(2, '0')}.md`),
-            'utf8'
-          );
+          const text = readCleanedChapter(work, ch);
           const { title } = splitLeadingChapterTitle(text);
           const segments = withChapterTitle(existing.segments, title);
+          // Scene breaks cannot be placed in an already-attributed script:
+          // the pause positions only exist while the text is being split.
+          if (paragraphsOf(text).some(isSceneBreak) && !segments.some((segment) => segment.kind === 'pause')) {
+            reportWarning(`Chapter ${ch.index + 1} was scripted before scene breaks were kept; rerun Script for it (run <epub> script --rerun --chapters ${ch.index}) to turn its breaks into pauses.`);
+          }
           if (legacy || segments.length !== existing.segments.length || segments.some((segment, i) => segment !== existing.segments[i])) {
             work.writeJson(scriptFile, { index: existing.index, story: storyId, characterScopeHash: scopeHash, segments });
           }
@@ -514,19 +600,13 @@ export async function runScript(
         }
       }
 
-      const cleanedText = fs.readFileSync(
-        work.path(`chapters-clean/${String(ch.index).padStart(2, '0')}.md`),
-        'utf8'
-      );
-      const { title, content: text } = splitLeadingChapterTitle(cleanedText);
+      const { title, content: text } = splitLeadingChapterTitle(readCleanedChapter(work, ch));
 
       let segments: ScriptSegment[];
       if (!analysis.isFiction) {
-        segments = text
-          .split(/\n\s*\n/)
-          .map((p) => p.trim())
-          .filter(Boolean)
-          .map((p) => ({ speaker: 'narrator', text: p, confidence: 'high' as const }));
+        segments = paragraphsOf(text).map((paragraph) => isSceneBreak(paragraph)
+          ? pauseSegment(paragraph)
+          : { speaker: 'narrator', text: paragraph, confidence: 'high' as const });
         update({ phase: 'saving', totalChars: text.length, processedChars: text.length });
       } else {
         // Prompts use the names the book's text writes, not the story-labelled
@@ -570,9 +650,9 @@ async function attributeChapter(
     .map((c) => `- ${c.name}${c.aliases.length ? ` (aka ${c.aliases.join(', ')})` : ''}: ${c.sex}, ${c.age}, ${c.importance}`)
     .join('\n');
 
-  const blocks = splitIntoBlocks(text, config.llmChunkChars);
+  const blocks = attributionBlocks(text, config.llmChunkChars);
   const segments: ScriptSegment[] = [];
-  const totalChars = blocks.reduce((sum, block) => sum + block.length, 0);
+  const totalChars = blocks.reduce((sum, block) => sum + block.text.length, 0);
   let processedChars = 0;
   // Sent with every block, so a long chapter's block-by-block summary is capped.
   const chapterSummary = condenseSummary(summaries[index] ?? '', config.promptSummaryChars);
@@ -588,13 +668,21 @@ async function attributeChapter(
   const finished = loadCheckpoint<ScriptSegment[]>(work, 'script', index, checkpoint, blocks.length);
   for (const [i, saved] of finished.entries()) {
     segments.push(...saved);
-    processedChars += blocks[i].length;
+    processedChars += blocks[i].text.length;
   }
 
   for (const [i, block] of blocks.entries()) {
     if (i < finished.length) continue;
+    // A block that is only a scene break needs no request at all.
+    if (!block.text.trim()) {
+      const onlyPause = block.sceneBreak ? [pauseSegment(block.sceneBreak)] : [];
+      segments.push(...onlyPause);
+      finished.push(onlyPause);
+      saveCheckpoint(work, 'script', index, checkpoint, finished);
+      continue;
+    }
     update({ phase: 'attributing', block: i + 1, totalBlocks: blocks.length, processedChars, totalChars });
-    const tail = segments.slice(-3).map((s) => `[${s.speaker}] ${s.text.slice(0, 120)}`).join('\n');
+    const tail = segments.slice(-3).map((segment) => contextLine(segment)).join('\n');
     const result = await jsonCall({
       model: config.scriptModel,
       reasoningEffort: config.scriptReasoningEffort,
@@ -741,18 +829,20 @@ ${castList}
 ${tail ? `\nPrevious segments (context):\n${tail}` : ''}
 
 Text:
-${block}`,
+${block.text}`,
     });
     const auditCandidates = findNarrationAuditCandidates(result.segments);
     if (auditCandidates.length) {
       update({ phase: 'repairing', processedChars, auditedSegments: auditCandidates.length });
     }
     const attributed = await repairNarrationBoundaries(result.segments, castList, characters);
+    // The scene break that closed this block becomes silence, not speech.
+    if (block.sceneBreak) attributed.push(pauseSegment(block.sceneBreak));
     segments.push(...attributed);
     // Saved before the speaker normalisation below mutates these segments.
     finished.push(attributed);
     saveCheckpoint(work, 'script', index, checkpoint, finished);
-    processedChars += block.length;
+    processedChars += block.text.length;
   }
 
   // Reasoning runs also review confident dialogue; those labels can be wrong.
@@ -778,7 +868,7 @@ ${block}`,
       .map((i) => {
         const ctx = segments
           .slice(Math.max(0, i - 3), i + 4)
-          .map((s, j) => `${Math.max(0, i - 3) + j === i ? '>>' : '  '} [${s.speaker}] ${s.text.slice(0, 240)}`)
+          .map((s, j) => `${Math.max(0, i - 3) + j === i ? '>>' : '  '} ${contextLine(s, 240)}`)
           .join('\n');
         return `Segment id ${i} (marked ">>"):\n${ctx}`;
       })

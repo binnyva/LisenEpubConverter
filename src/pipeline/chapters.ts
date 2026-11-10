@@ -9,11 +9,16 @@ import { CharacterObservationSchema, ChapterCharactersSchema, type ChapterCharac
 import { buildCharacterRegistry, characterChapterFile } from './list-characters.js';
 import { readStories, storyFor } from './stories.js';
 import { reportProgress, type ChapterProgress } from '../util/progress.js';
-import { applyCleanupEdits, dropLayoutOnlyParagraphs } from './cleanup.js';
+import { applyCleanupEdits, dropEmptyParagraphs, restoreSceneBreaks } from './cleanup.js';
 import { reportWarning } from '../util/warnings.js';
 import { checkpointKey, clearCheckpoints, loadCheckpoint, saveCheckpoint } from './checkpoint.js';
 
 const DiscoverySchema = z.object({ characters: z.array(CharacterObservationSchema) });
+/** Non-fiction has no cast to discover, so its request carries no character fields. */
+const CleanupResultSchema = z.object({
+  edits: z.array(z.object({ find: z.string(), replace: z.string() })),
+  partialSummary: z.string(),
+});
 const ChunkResultSchema = DiscoverySchema.extend({
   edits: z.array(z.object({ find: z.string(), replace: z.string() })),
   partialSummary: z.string(),
@@ -146,7 +151,15 @@ export async function runChapters(work: WorkDir, chapterIndexes?: number[]): Pro
     if (hasCleanOutput) {
       // Repair legacy clean files without re-running an LLM call.
       const existing = fs.readFileSync(work.path(cleanFile), 'utf8');
-      const normalized = normalizeNonBreakingSpaces(existing);
+      // Scene-break dividers were dropped by earlier cleanup runs. Put them
+      // back from the extracted chapter rather than cleaning the text again.
+      const scenes = ch.file && fs.existsSync(work.path(ch.file))
+        ? restoreSceneBreaks(fs.readFileSync(work.path(ch.file), 'utf8'), existing)
+        : { text: existing, restored: 0, missed: 0 };
+      if (scenes.missed) {
+        reportWarning(`Chapter ${ch.index + 1}: could not place ${scenes.missed} scene break(s) in the existing cleaned text; rerun this chapter with --rerun to recover them.`);
+      }
+      const normalized = normalizeNonBreakingSpaces(scenes.text);
       if (normalized !== existing) fs.writeFileSync(work.path(cleanFile), normalized);
       if (fs.existsSync(work.path(observationFile))) {
         const existingObservations = ChapterCharactersSchema.parse(work.readJson(observationFile));
@@ -211,7 +224,13 @@ export async function runChapters(work: WorkDir, chapterIndexes?: number[]): Pro
       progress(`${hasCleanOutput ? 'Discovering speakers in' : 'Cleaning and summarizing'} block ${i + 1}/${blocks.length} — waiting for model response`);
       const knownCharacters = buildCharacterRegistry([...earlierDiscoveries, discoveries]).characters
         .map(({ name, aliases, chapters }) => ({ name, aliases, chapters }));
-      const context = `Book: "${meta.title}" (${analysis.isFiction ? 'fiction' : 'non-fiction'}${stories.collection ? ', a collection of separate short stories' : ''})
+      // Non-fiction cleanup needs only the text: there are no speakers to
+      // track, and the summaries and cast lists below exist to track them.
+      const context = !analysis.isFiction
+        ? `Book: "${meta.title}" (non-fiction)
+Chapter ${ch.index}: "${ch.title}" (part ${i + 1} of ${blocks.length})
+Text:\n${block}`
+        : `Book: "${meta.title}" (${analysis.isFiction ? 'fiction' : 'non-fiction'}${stories.collection ? ', a collection of separate short stories' : ''})
 Book summary (provisional): ${analysis.summary}
 ${stories.collection
   ? `This chapter belongs to the story "${storyFor(stories, ch.index)?.title ?? ch.title}". Characters from other stories in this book are different people, even when they share a name.`
@@ -235,11 +254,10 @@ Text:\n${block}`;
         processedChars += block.length;
         continue;
       }
-      const result = await jsonCall({
+      const request = {
         model: config.chapterModel,
         disableReasoning: !analysis.isFiction,
-        schema: ChunkResultSchema,
-        system: `You prepare book chapters for audiobook narration. Respond with JSON: {"edits": [{"find": "...", "replace": "..."}], "partialSummary": "...", "characters": [...]}.
+        system: `You prepare book chapters for audiobook narration. Respond with JSON: {"edits": [{"find": "...", "replace": "..."}], "partialSummary": "..."${analysis.isFiction ? ', "characters": [...]' : ''}}.
 
 edits: the text is kept exactly as written. List only the small corrections it needs to read well aloud. Most text needs none; return "edits": [] then.
 - find: a short exact quotation from the text, copied character for character, with enough neighbouring words to identify the place. replace: what should be read instead. Every occurrence of find in this text is replaced.
@@ -248,18 +266,20 @@ edits: the text is kept exactly as written. List only the small corrections it n
 - Correct an obvious scanning or typesetting error only when the intended word is certain.
 - Do not change wording, spelling, contractions, punctuation, quotation marks, or style. Do not remove or rewrite sentences. Do not touch markdown headings.
 
-partialSummary: 2-4 sentences summarizing what happens in THIS text.
-${CHARACTER_RULES}`,
+partialSummary: 2-4 sentences summarizing what happens in THIS text.${analysis.isFiction ? `\n${CHARACTER_RULES}` : ''}`,
         user: context,
-      });
+      };
+      const result = analysis.isFiction
+        ? await jsonCall({ ...request, schema: ChunkResultSchema })
+        : { ...await jsonCall({ ...request, schema: CleanupResultSchema }), characters: [] };
       // The model lists corrections; the prose itself is the source text.
       const cleanup = applyCleanupEdits(block, result.edits ?? []);
       if (cleanup.skipped.length) {
         reportWarning(`Chapter ${ch.index + 1}, block ${i + 1}: skipped ${cleanup.skipped.length} cleanup edit(s) and kept the source text there (${cleanup.skipped.slice(0, 3)
           .map(({ find, reason }) => `${JSON.stringify(find.slice(0, 40))}: ${reason}`).join('; ')}${cleanup.skipped.length > 3 ? '; …' : ''}).`);
       }
-      const cleanedText = normalizeNonBreakingSpaces(dropLayoutOnlyParagraphs(cleanup.text));
-      const observations = analysis.isFiction ? result.characters.map((character) => ({ ...character, chunk: i })) : [];
+      const cleanedText = normalizeNonBreakingSpaces(dropEmptyParagraphs(cleanup.text));
+      const observations = result.characters.map((character) => ({ ...character, chunk: i }));
       cleanedParts.push(cleanedText);
       partialSummaries.push(result.partialSummary);
       discoveries.observations.push(...observations);

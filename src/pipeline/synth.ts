@@ -10,7 +10,7 @@ import { reportProgress } from '../util/progress.js';
 import { throwIfTaskCancelled, taskCancellationSignal, waitForRetry } from '../util/cancellation.js';
 import { validateVoiceBindings } from './voices.js';
 import type { WorkDir } from '../state.js';
-import type { BookMetadata, Casting, ChapterAudioManifest, ChapterScript } from '../types.js';
+import type { BookMetadata, Casting, ChapterAudioEntry, ChapterAudioManifest, ChapterScript } from '../types.js';
 
 /**
  * Stage 8: synthesize every script segment to MP3. Each unique
@@ -54,8 +54,14 @@ export async function runSynth(work: WorkDir, chapterIndexes?: number[]): Promis
     reportProgress({ activity: 'Preparing audio segments', chapterIndex: script.index, chapterTitle, completedChapters, totalChapters: scriptFiles.length });
     const manifestFile = `audio/${String(script.index).padStart(2, '0')}-segments.json`;
 
-    const pieces: Array<{ hash: string; text: string; voiceId: string; instructions: string }> = [];
+    type SpeechPiece = { hash: string; text: string; voiceId: string; instructions: string };
+    const pieces: Array<SpeechPiece | { pauseMs: number }> = [];
     for (const seg of script.segments) {
+      // A scene break is silence: no request, no cost, assembled by ffmpeg.
+      if (seg.kind === 'pause') {
+        pieces.push({ pauseMs: seg.pauseMs ?? config.sceneBreakPauseMs });
+        continue;
+      }
       const speaker =
         seg.speaker === 'narrator'
           ? casting.narrator
@@ -80,17 +86,18 @@ export async function runSynth(work: WorkDir, chapterIndexes?: number[]): Promis
       }
     }
 
-    total += pieces.length;
+    const speech = pieces.filter((piece): piece is SpeechPiece => 'hash' in piece);
+    total += speech.length;
     let ready = 0;
     let chapterCached = 0;
     const progress = (activity: string, phase?: 'saving' | 'completed') => reportProgress({
       activity, phase, chapterIndex: script.index, chapterTitle,
       completedChapters, totalChapters: scriptFiles.length,
-      completedUnits: ready, totalUnits: pieces.length, unit: 'audio segments ready',
+      completedUnits: ready, totalUnits: speech.length, unit: 'audio segments ready',
     });
     progress('Synthesizing speech and checking cached audio');
     await Promise.all(
-      pieces.map((piece) =>
+      speech.map((piece) =>
         limit(async () => {
           throwIfTaskCancelled();
           const out = `${cacheDir}/${piece.hash}.mp3`;
@@ -113,7 +120,7 @@ export async function runSynth(work: WorkDir, chapterIndexes?: number[]): Promis
 
     const manifest: ChapterAudioManifest = {
       index: script.index,
-      segments: pieces.map((p) => p.hash),
+      segments: pieces.map((p): ChapterAudioEntry => ('hash' in p ? p.hash : { pauseMs: p.pauseMs })),
     };
     progress('Saving chapter audio manifest', 'saving');
     work.writeJson(manifestFile, manifest);

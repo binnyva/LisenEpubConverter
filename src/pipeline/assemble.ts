@@ -6,7 +6,7 @@ import { config } from '../config.js';
 import { reportProgress } from '../util/progress.js';
 import { taskCancellationSignal, throwIfTaskCancelled } from '../util/cancellation.js';
 import type { WorkDir } from '../state.js';
-import type { BookMetadata, ChapterAudioManifest } from '../types.js';
+import type { BookMetadata, ChapterAudioEntry, ChapterAudioManifest } from '../types.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -21,6 +21,50 @@ async function durationOf(file: string): Promise<number> {
     { encoding: 'utf8', signal: taskCancellationSignal() }
   );
   return parseFloat(stdout.trim());
+}
+
+/**
+ * Sample rate and channel count of a synthesized segment. Scene-break silence
+ * has to match it: the concat demuxer joins streams, it does not resample them.
+ */
+async function audioFormatOf(file: string): Promise<{ rate: string; channels: string }> {
+  const { stdout } = await execFileAsync(
+    'ffprobe',
+    ['-v', 'error', '-select_streams', 'a:0', '-show_entries', 'stream=sample_rate,channels', '-of', 'default=noprint_wrappers=1', file],
+    { encoding: 'utf8', signal: taskCancellationSignal() }
+  );
+  const values = new Map(stdout.trim().split(/\r?\n/).map((line) => line.split('=') as [string, string]));
+  const rate = values.get('sample_rate');
+  const channels = values.get('channels');
+  if (!rate || !channels) throw new Error(`ffprobe reported no audio stream in ${file}. Rerun synth for this chapter.`);
+  return { rate, channels };
+}
+
+/**
+ * An MP3 of silence for a scene break, encoded once per length and format and
+ * kept in the derived audio folder. Nothing is paid for and nothing is cached
+ * alongside synthesized speech.
+ */
+async function silenceFile(work: WorkDir, pauseMs: number, format: { rate: string; channels: string }): Promise<string> {
+  const file = work.path('audio', `silence-${pauseMs}ms-${format.rate}-${format.channels}.mp3`);
+  if (fs.existsSync(file)) return file;
+  const layout = format.channels === '1' ? 'mono' : 'stereo';
+  const source = ['-f', 'lavfi', '-i', `anullsrc=r=${format.rate}:cl=${layout}`, '-t', String(pauseMs / 1000)];
+  const pending = file + '.tmp.mp3';
+  try {
+    try {
+      await ffmpeg([...source, '-c:a', 'libmp3lame', '-b:a', '64k', pending]);
+    } catch {
+      // Some ffmpeg builds expose the encoder only under its generic name.
+      await ffmpeg([...source, '-c:a', 'mp3', '-b:a', '64k', pending]);
+    }
+    fs.renameSync(pending, file);
+  } catch (err) {
+    throw new Error(`ffmpeg could not encode the ${pauseMs}ms scene-break silence (${(err as Error).message}). This needs an ffmpeg build with an MP3 encoder, such as "brew install ffmpeg".`);
+  } finally {
+    fs.rmSync(pending, { force: true });
+  }
+  return file;
 }
 
 function escapeMeta(s: string): string {
@@ -56,18 +100,34 @@ export async function runAssemble(work: WorkDir, outDir?: string, chapterIndexes
       chapterIndex: manifest.index, chapterTitle: chapterTitle(manifest.index),
       completedUnits: encoded, totalUnits: manifests.length, unit: 'chapters encoded',
     });
-    if (fs.existsSync(chapterFile)) {
+    const manifestFile = work.path('audio', `${String(manifest.index).padStart(2, '0')}-segments.json`);
+    // A manifest rewritten after this encode (new pauses, a changed script)
+    // makes the existing file stale, so reuse it only while it is newer.
+    if (fs.existsSync(chapterFile) && fs.statSync(chapterFile).mtimeMs >= fs.statSync(manifestFile).mtimeMs) {
       encoded++;
       progress('Reusing encoded chapter');
       continue;
     }
     progress(`Encoding ${manifest.segments.length} audio segments — waiting for ffmpeg`);
 
+    const pauses = manifest.segments.filter((entry): entry is { pauseMs: number } => typeof entry !== 'string');
+    const silence = new Map<number, string>();
+    if (pauses.length) {
+      const firstHash = manifest.segments.find((entry): entry is string => typeof entry === 'string');
+      if (!firstHash) throw new Error(`Chapter ${manifest.index + 1} has no synthesized speech — rerun synth for it.`);
+      const format = await audioFormatOf(work.path('audio-cache', `${firstHash}.mp3`));
+      for (const { pauseMs } of pauses) {
+        if (!silence.has(pauseMs)) silence.set(pauseMs, await silenceFile(work, pauseMs, format));
+      }
+    }
+    const sourceOf = (entry: ChapterAudioEntry): string =>
+      typeof entry === 'string' ? work.path('audio-cache', `${entry}.mp3`) : silence.get(entry.pauseMs)!;
+
     const listFile = work.path('audio', `concat-${manifest.index}.txt`);
     fs.writeFileSync(
       listFile,
       manifest.segments
-        .map((h) => `file '${work.path('audio-cache', `${h}.mp3`).replace(/'/g, "'\\''")}'`)
+        .map((entry) => `file '${sourceOf(entry).replace(/'/g, "'\\''")}'`)
         .join('\n')
     );
     // Publish only successful encodes so a failed request can be resumed safely.

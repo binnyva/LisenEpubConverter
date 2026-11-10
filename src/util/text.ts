@@ -102,3 +102,19 @@ export function normalizeNonBreakingSpaces(text: string): string {
 export function hasNarratableText(text: string): boolean {
   return /[\p{L}\p{N}]/u.test(text);
 }
+
+/**
+ * Whether a paragraph is a scene-break divider: not empty, but with nothing a
+ * narrator could say ("• • •", "* * *", "———"). EPUBs mark a change of scene
+ * this way, and in audio the divider is the only thing that marks it, so it is
+ * kept through cleanup and turned into a pause before synthesis.
+ */
+export function isSceneBreak(paragraph: string): boolean {
+  const trimmed = paragraph.trim();
+  return trimmed !== '' && !hasNarratableText(trimmed);
+}
+
+/** Split markdown into paragraphs, dropping empty ones and keeping scene breaks. */
+export function paragraphsOf(text: string): string[] {
+  return text.split(/\n\s*\n/).map((paragraph) => paragraph.trim()).filter(Boolean);
+}

@@ -243,6 +243,25 @@ describe('character discovery orchestration', () => {
     expect(llm).not.toHaveBeenCalled();
   });
 
+  it('sends non-fiction cleanup only the text, without summaries or character fields', async () => {
+    const { work, options } = fixture();
+    work.writeJson('analysis.json', {
+      ...work.readJson<object>('analysis.json'), isFiction: false,
+      summary: 'A provisional overview of the whole book.', characters: [{ name: 'Sampled Person' }],
+    });
+    llm.mockResolvedValue({ edits: [], partialSummary: 'What the first chapter argued.' });
+
+    await runStage({ ...options, stage: 'chapters' });
+
+    const second = llm.mock.calls[1][0] as { system: string; user: string; schema: { shape: object } };
+    expect(second.user).toBe('Book: "Story" (non-fiction)\nChapter 1: "Chapter 2" (part 1 of 1)\nText:\nChapter 1: Hello.');
+    expect(second.system).toContain('"partialSummary"');
+    expect(second.system).not.toContain('characters');
+    expect(Object.keys(second.schema.shape)).toEqual(['edits', 'partialSummary']);
+    expect(work.readJson('chapter-summaries.json')).toEqual({ 0: 'What the first chapter argued.', 1: 'What the first chapter argued.' });
+    expect(work.readJson<any>(characterChapterFile(1)).observations).toEqual([]);
+  });
+
   it('turns reasoning off when cleaning a new non-fiction chapter', async () => {
     const { work, options } = fixture(1);
     work.writeJson('analysis.json', { ...work.readJson<object>('analysis.json'), isFiction: false });

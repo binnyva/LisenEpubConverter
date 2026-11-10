@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WorkDir } from '../src/state.js';
-import { applyCleanupEdits, dropLayoutOnlyParagraphs } from '../src/pipeline/cleanup.js';
+import { applyCleanupEdits, dropEmptyParagraphs, restoreSceneBreaks } from '../src/pipeline/cleanup.js';
 import { runStage, type PipelineEvent } from '../src/pipeline/runner.js';
 import { jsonCall } from '../src/providers/llm/openai.js';
 
@@ -65,9 +65,44 @@ describe('applyCleanupEdits', () => {
   });
 });
 
-describe('dropLayoutOnlyParagraphs', () => {
-  it('removes dividers and keeps prose and headings', () => {
-    expect(dropLayoutOnlyParagraphs('# One\n\nFirst.\n\n* * *\n\n———\n\nSecond.')).toBe('# One\n\nFirst.\n\nSecond.');
+describe('dropEmptyParagraphs', () => {
+  it('keeps scene-break dividers alongside prose and headings', () => {
+    expect(dropEmptyParagraphs('# One\n\nFirst.\n\n• • •\n\n   \n\nSecond.'))
+      .toBe('# One\n\nFirst.\n\n• • •\n\nSecond.');
+  });
+});
+
+describe('restoreSceneBreaks', () => {
+  const raw = '# One\n\nFirst paragraph here.\n\n• • •\n\nSecond paragraph here.\n\nThird paragraph here.\n\n* * *\n\nFourth paragraph here.';
+
+  it('puts dividers back where the extracted chapter has them', () => {
+    const cleaned = '# One\n\nFirst paragraph here.\n\nSecond paragraph here.\n\nThird paragraph here.\n\nFourth paragraph here.';
+
+    expect(restoreSceneBreaks(raw, cleaned)).toEqual({ text: raw, restored: 2, missed: 0 });
+  });
+
+  it('anchors a divider on prose a cleanup edit has changed', () => {
+    const cleaned = '# One\n\nFirst paragraph here, that is here.\n\nSecond paragraph here.\n\nThird paragraph here.\n\nFourth paragraph here.';
+    const result = restoreSceneBreaks(raw, cleaned);
+
+    expect(result.restored).toBe(2);
+    expect(result.text).toContain('that is here.\n\n• • •\n\nSecond');
+  });
+
+  it('reports a divider whose surrounding paragraphs are gone instead of guessing', () => {
+    const result = restoreSceneBreaks('Alpha.\n\n• • •\n\nBeta.', 'Something else entirely.');
+
+    expect(result).toEqual({ text: 'Something else entirely.', restored: 0, missed: 1 });
+  });
+
+  it('leaves text that already carries its dividers untouched', () => {
+    expect(restoreSceneBreaks(raw, raw)).toEqual({ text: raw, restored: 0, missed: 0 });
+  });
+
+  it('keeps a divider that opens the chapter', () => {
+    const result = restoreSceneBreaks('• • •\n\nFirst paragraph here.', 'First paragraph here.');
+
+    expect(result.text).toBe('• • •\n\nFirst paragraph here.');
   });
 });
 
@@ -103,7 +138,7 @@ describe('Chapters cleanup', () => {
     await runStage({ sourcePath, workRoot: root, stage: 'chapters', onEvent: (event) => events.push(event) });
 
     expect(fs.readFileSync(work.path('chapters-clean/00.md'), 'utf8'))
-      .toBe('# One\n\nShe didn’t walk 5 kilometres, for example to work.\n\nThe end.');
+      .toBe('# One\n\nShe didn’t walk 5 kilometres, for example to work.\n\n* * *\n\nThe end.');
     const warning = events.find((event) => event.type === 'warning')?.message ?? '';
     expect(warning).toContain('Chapter 1, block 1: skipped 1 cleanup edit(s)');
     expect(warning).toContain('She did not walk');

@@ -211,6 +211,10 @@ export const config = {
   distinctVoiceSlots: 8,
   /** Audio bitrate for chapter/book AAC encoding. */
   audioBitrate: '96k',
+  /** Silence inserted where the book marks a scene break ("• • •"). */
+  get sceneBreakPauseMs(): number {
+    return positiveIntFromEnv('LISEN_SCENE_BREAK_PAUSE_MS', 2_000);
+  },
 };
 
 export const STAGES = [

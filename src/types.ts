@@ -138,11 +138,18 @@ export type CharacterRegistry = z.infer<typeof CharacterRegistrySchema>;
 export const ScriptSegmentSchema = z.object({
   /** 'narrator' or a canonical name from the book's character registry. */
   speaker: z.string(),
-  /** Verbatim text to be spoken. */
+  /** Verbatim text to be spoken, or the divider a pause segment stands for. */
   text: z.string(),
   /** Optional delivery hint for TTS instructions, e.g. "whispering". */
   delivery: z.string().optional(),
   confidence: z.enum(['high', 'low']).default('high'),
+  /**
+   * 'pause' is a scene break: silence instead of speech, with no TTS request
+   * and no cost. Absent means ordinary speech, so existing scripts stay valid.
+   */
+  kind: z.enum(['speech', 'pause']).optional(),
+  /** Silence length of a pause segment; defaults to config.sceneBreakPauseMs. */
+  pauseMs: z.number().int().positive().optional(),
 });
 export type ScriptSegment = z.infer<typeof ScriptSegmentSchema>;
 
@@ -215,8 +222,11 @@ export type VoiceBindings = z.infer<typeof VoiceBindingsSchema>;
 
 // ---------- Stage 8: synth ----------
 
+/** One piece of a chapter: an audio-cache hash, or a stretch of silence. */
+export type ChapterAudioEntry = string | { pauseMs: number };
+
 export interface ChapterAudioManifest {
   index: number;
-  /** Ordered audio-cache hashes making up the chapter. */
-  segments: string[];
+  /** Ordered audio-cache hashes and pauses making up the chapter. */
+  segments: ChapterAudioEntry[];
 }
