@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import OpenAI from 'openai';
 import { z } from 'zod';
-import { config } from '../../config.js';
+import { config, type OpenRouterReasoningEffort } from '../../config.js';
 import { reportWarning } from '../../util/warnings.js';
 import { TaskCancelledError, taskCancellationSignal, waitForRetry } from '../../util/cancellation.js';
 
@@ -44,6 +44,7 @@ type OpenRouterResponse = {
     prompt_tokens?: unknown;
     completion_tokens?: unknown;
     total_tokens?: unknown;
+    completion_tokens_details?: { reasoning_tokens?: unknown };
   };
   openrouter_metadata?: {
     provider_name?: unknown;
@@ -70,6 +71,8 @@ function openRouterDiagnostics(body: unknown, response: Response): string {
     refusal: typeof choice?.message?.refusal === 'string' ? 'present' : undefined,
     promptTokens: typeof parsed.usage?.prompt_tokens === 'number' ? parsed.usage.prompt_tokens : undefined,
     completionTokens: typeof parsed.usage?.completion_tokens === 'number' ? parsed.usage.completion_tokens : undefined,
+    reasoningTokens: typeof parsed.usage?.completion_tokens_details?.reasoning_tokens === 'number'
+      ? parsed.usage.completion_tokens_details.reasoning_tokens : undefined,
     totalTokens: typeof parsed.usage?.total_tokens === 'number' ? parsed.usage.total_tokens : undefined,
     errorCode: typeof parsed.error?.code === 'string' || typeof parsed.error?.code === 'number' ? parsed.error.code : undefined,
     upstreamError: typeof parsed.error?.metadata?.raw === 'string' ? parsed.error.metadata.raw.slice(0, 1000) : undefined,
@@ -141,7 +144,14 @@ function writeOpenRouterTrace(entry: Record<string, unknown>): Promise<void> | u
     .catch(() => undefined);
 }
 
-async function createCompletion(model: string, messages: Message[], schema: z.ZodType): Promise<Completion> {
+async function createCompletion(
+  model: string,
+  messages: Message[],
+  schema: z.ZodType,
+  reasoningEffort?: OpenRouterReasoningEffort,
+  maxCompletionTokens?: number,
+  disableReasoning = false,
+): Promise<Completion> {
   const controller = new AbortController();
   const timeoutMessage = `LLM request timed out after ${config.llmResponseTimeoutMs / 1000} seconds without a model response.`;
   const timeout = setTimeout(() => controller.abort(new Error(timeoutMessage)), config.llmResponseTimeoutMs);
@@ -154,8 +164,12 @@ async function createCompletion(model: string, messages: Message[], schema: z.Zo
         model,
         messages,
         response_format: { type: 'json_object' },
-        max_completion_tokens: config.llmMaxCompletionTokens,
+        max_completion_tokens: maxCompletionTokens ?? config.llmMaxCompletionTokens,
+        ...(!disableReasoning && reasoningEffort && reasoningEffort !== 'none' ? { reasoning_effort: reasoningEffort } : {}),
       }, { signal });
+      if (res.choices[0]?.finish_reason === 'length') {
+        throw new NonRetryableLLMError('LLM response reached its completion token limit. Increase LISEN_SCRIPT_MAX_COMPLETION_TOKENS for Script reasoning, or LISEN_LLM_MAX_COMPLETION_TOKENS for other stages.');
+      }
       return { content: res.choices[0]?.message?.content ?? '' };
     }
 
@@ -169,14 +183,16 @@ async function createCompletion(model: string, messages: Message[], schema: z.Zo
       // OpenRouter's endpoint capability metadata advertises this as
       // `max_tokens`. With require_parameters enabled, the OpenAI-specific
       // `max_completion_tokens` name can exclude otherwise compatible routes.
-      max_tokens: config.llmMaxCompletionTokens,
+      max_tokens: maxCompletionTokens ?? config.llmMaxCompletionTokens,
       // Chapter cleanup and the other Lisen stages need schema-shaped output,
       // not a reasoning transcript. Omitting this when disabled is important:
       // require_parameters would otherwise exclude endpoints that do not
       // expose OpenRouter's optional reasoning parameter.
-      ...(config.openRouterReasoningEffort === 'none'
-        ? {}
-        : { reasoning: { effort: config.openRouterReasoningEffort } }),
+      ...(disableReasoning
+        ? { reasoning: { enabled: false } }
+        : (reasoningEffort ?? config.openRouterReasoningEffort) === 'none'
+          ? {}
+          : { reasoning: { effort: reasoningEffort ?? config.openRouterReasoningEffort } }),
       // Do not let OpenRouter route to a provider that would silently ignore
       // JSON mode; every pipeline stage relies on schema-valid JSON.
       provider: {
@@ -235,6 +251,9 @@ async function createCompletion(model: string, messages: Message[], schema: z.Zo
       }
       throw new NonRetryableLLMError(message);
     }
+    if ((body as OpenRouterResponse).choices?.[0]?.finish_reason === 'length') {
+      throw new NonRetryableLLMError(`LLM response reached its completion token limit. Increase LISEN_SCRIPT_MAX_COMPLETION_TOKENS for Script reasoning, or LISEN_LLM_MAX_COMPLETION_TOKENS for other stages. Diagnostics: ${diagnostics}`);
+    }
     const content = (body as { choices?: Array<{ message?: { content?: unknown } }> }).choices?.[0]?.message
       ?.content;
     if (typeof content !== 'string' || !content.trim()) {
@@ -260,6 +279,10 @@ export async function jsonCall<S extends z.ZodType>(opts: {
   system: string;
   user: string;
   schema: S;
+  reasoningEffort?: OpenRouterReasoningEffort;
+  /** Force thinking off for output-heavy work on models that enable it by default. */
+  disableReasoning?: boolean;
+  maxCompletionTokens?: number;
   maxRetries?: number;
 }): Promise<z.infer<S>> {
   const maxRetries = opts.maxRetries ?? config.llmMaxRetries;
@@ -279,7 +302,7 @@ export async function jsonCall<S extends z.ZodType>(opts: {
           content: `Your previous response was invalid: ${lastError}\nRespond again with corrected JSON only.`,
         });
       }
-      const completion = await createCompletion(opts.model, messages, opts.schema);
+      const completion = await createCompletion(opts.model, messages, opts.schema, opts.reasoningEffort, opts.maxCompletionTokens, opts.disableReasoning);
       raw = completion.content;
       diagnostics = completion.diagnostics;
     } catch (err) {

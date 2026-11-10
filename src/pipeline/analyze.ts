@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { AnalysisSchema, type Analysis, type BookMetadata } from '../types.js';
 import type { WorkDir } from '../state.js';
 import { reportProgress } from '../util/progress.js';
+import { buildStories, writeStories } from './stories.js';
 
 const SKIP_TITLE_RE =
   /\b(contents|table of contents|acknowledg|thanks|appendix|index|copyright|license|colophon|dedication|about the author|also by|praise for|title page|other books|project gutenberg)\b/i;
@@ -39,6 +40,9 @@ export async function runAnalyze(work: WorkDir): Promise<Analysis> {
     system: `You analyze books to prepare them for audiobook narration. Respond with JSON matching:
 {
   "isFiction": boolean,
+  "isCollection": boolean,
+  "collectionReason": "one short sentence",
+  "stories": [{"title": "story title", "chapters": [number]}],
   "summary": "2-3 paragraph summary of the book",
   "characters": [{"name", "aliases": [], "sex": "male|female|unknown", "age", "race", "class", "country", "importance": "main|secondary|minor"}],
   "author": {same fields as a character},
@@ -46,6 +50,8 @@ export async function runAnalyze(work: WorkDir): Promise<Analysis> {
 }
 Rules:
 - For non-fiction, "characters" should be an empty array.
+- isCollection=true for a short story collection or anthology, where each story has its own cast and the chapters do not share one continuous plot. A novel, a novel in parts, and a single-subject non-fiction book are all isCollection=false. Judge this from the chapter titles and the sampled text, not from prior knowledge of the book; say why in collectionReason.
+- stories: [] when isCollection is false. Otherwise group the narrated chapters into stories, in chapter order, using the chapter index numbers given. Every narrated chapter belongs to exactly one story. A story is usually one chapter; list several chapters together only when they are parts of the same story, such as a repeated title or "Part II".
 - The text is a sample, not the whole book. The summary and character list are provisional.
 - List only speaking characters supported by the supplied excerpts; do not invent a complete cast or rely on prior knowledge of the book.
 - Set character traits only when supported by the supplied text; otherwise use "unknown". Do not infer an accent from a name.
@@ -79,6 +85,17 @@ ${sampled}`,
   });
 
   work.writeJson('analysis.json', analysis);
-  reportProgress({ activity: 'Analysis saved', phase: 'completed' });
+
+  // An explicit choice always wins over sampled detection, and survives an
+  // Analyze rebuild. Later stages read the grouping, never the raw flag.
+  const collection = work.collection() ?? analysis.isCollection;
+  const stories = buildStories(collection, meta, analysis);
+  writeStories(work, stories);
+  reportProgress({
+    activity: collection
+      ? `Analysis saved; treating the source as a collection of ${stories.stories.length} stories`
+      : 'Analysis saved',
+    phase: 'completed',
+  });
   return analysis;
 }

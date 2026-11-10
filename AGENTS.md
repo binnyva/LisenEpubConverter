@@ -47,6 +47,7 @@ src/
   types.ts             # shared zod schemas / types for pipeline artifacts
   pipeline/
     runner.ts          # shared orchestration, prerequisites, rebuild/rerun, events, discovery
+    stories.ts         # collection flag, story grouping (stories.json), story labels
     *.ts               # extract, analyze, chapters, list-characters, script, casting, voices, synth, assemble
   ui/server.ts         # localhost HTTP API, single active job, embedded HTML/JS workspace
   epub/                # EPUB unzip + OPF parsing (epub.ts), xhtml→markdown (markdown.ts)
@@ -67,7 +68,7 @@ work/                  # gitignored per-book artifacts; work/alice/ is a sample 
 
 ## Architecture in one paragraph
 
-`convert` iterates the nine stages in `STAGES` order (`src/config.ts`): extract → analyze → chapters → list-characters → script → casting → voices → synth → assemble. CLI commands and the UI call `runStage()` in `src/pipeline/runner.ts`, which checks prerequisites, handles invalidation and cleanup, dispatches stage functions, and records completion. Stages read and write `WorkDir` artifacts, with JSON/markdown available for inspection and editing. `casting.json` describes desired speaker profiles; `voice-bindings.json` records the concrete provider/model/native voices used for synthesis. `chapters`, `script`, and `synth` support chapter selection and chapter completion tracking; assembly also accepts chapter selection but only full-book assembly marks the stage complete.
+`convert` iterates the nine stages in `STAGES` order (`src/config.ts`): extract → analyze → chapters → list-characters → script → casting → voices → synth → assemble. CLI commands and the UI call `runStage()` in `src/pipeline/runner.ts`, which checks prerequisites, handles invalidation and cleanup, dispatches stage functions, and records completion. Stages read and write `WorkDir` artifacts, with JSON/markdown available for inspection and editing. Characters are scoped by story: `stories.json` holds one story for a continuous work and one per short story for a collection, and `list-characters`, `script`, `casting`, and `voices` all scope their work the same way through it. `casting.json` describes desired speaker profiles; `voice-bindings.json` records the concrete provider/model/native voices used for synthesis. `chapters`, `script`, and `synth` support chapter selection and chapter completion tracking; assembly also accepts chapter selection but only full-book assembly marks the stage complete.
 
 ## Resuming, rerunning, and rebuilding
 
@@ -75,6 +76,8 @@ work/                  # gitignored per-book artifacts; work/alice/ is a sample 
 - `run <epub> <stage>` executes exactly one stage. `--rerun` invalidates completion from that stage onward and clears only output needed to execute that stage again; downstream artifacts remain. `--rebuild` removes that stage's derived artifacts as defined in `clearArtifactsFrom()`. It cannot be combined with `--rerun` or a chapter selection.
 - `convert --from <stage>` rebuilds from that stage and continues the pipeline; `--force` rebuilds from extract. Audio cache and exported M4Bs are retained; assembly overwrites a matching output filename.
 - A changed EPUB hash preserves existing completion history and artifacts, sets `sourceChanged`, and blocks runs until `extract --rebuild`. Matching content at a new path updates the source link. UI artifact recovery only applies when the source matches and completion history is empty.
+- Each chapter script records `story` and `characterScopeHash` — a hash of only the names, aliases, and chapters of its own story — so a registry change re-attributes only the stories whose cast changed. Scripts written before story scopes carry `characterRegistryHash`; an unchanged registry still matches through `legacyCharacterRegistryHash()` and the script is upgraded in place rather than re-attributed. Keep both paths, and keep the scope hash projection-based: hashing whole artifacts makes schema growth cost real LLM and TTS spend.
+- Changing the collection flag (`--collection` / `--no-collection`, recorded in `state.json`) or the grouping regroups stories and clears the registry, scripts, cast, bindings, and encoded chapters, retaining cleaned text, observations, and `audio-cache/`.
 - Saving casting/bindings in the UI invalidates and clears affected derived output while retaining MP3s. The runner also detects cast/binding file changes after completed synthesis using `synthesisInputHash`. For upstream hand edits that require regenerated downstream artifacts, use an explicit rebuild.
 
 ## Conventions
@@ -93,6 +96,14 @@ work/                  # gitignored per-book artifacts; work/alice/ is a sample 
 
 `npm test` runs offline Vitest tests covering EPUB/OPF parsing, markdown/text cleanup, script segment filtering, mocked OpenRouter LLM/TTS requests, catalogue parsing and migration, voice matching/manual overrides, source and chapter state, retry warning events, and UI activity rendering. Use these mocks for provider and orchestration regressions; no live API calls are needed for the suite. Run `npm run build` for TypeScript validation. Live output quality can be reviewed with an authorized `--dry-run` and artifact inspection; dry runs do not test TTS. Existing `work/alice/` output, when present, is useful reference material and may use older artifact formats.
 
+## Short story collections
+
+- `analyze` detects a collection, proposes the grouping (`analysis.stories`), and writes `stories.json`; a user override in `state.json` always wins and survives an Analyze rebuild. Later stages read the grouping, never the raw flag.
+- `validateStories()` is the single gate: a grouping must cover every narratable chapter exactly once, in chapter order, with distinct ids. A proposal that fails it is reported and replaced by one story per chapter; a hand edit or UI save that fails it is rejected. Story ids are `story-<first chapter>`, which keeps an unrelated story's scope hash stable when chapters move.
+- Grouping changes go through `saveStoryGrouping()` (runner), used by `--collection`, `POST /api/stories`, and the UI panel. `--story` / `storyIndexes` select a stage's chapters by 1-based story number.
+- Names are consolidated per story, and a name shared by two stories is labelled with its story title (`John (Rescue Party)`), because `casting.json`, `voice-bindings.json`, and script segments are all keyed by name. Script maps the book's own name onto the labelled canonical name, so prompts never show the label.
+- Script offers the model only the current story's cast; a speaker from another story becomes a reviewable candidate. Casting makes one request per story plus one for the single book narrator. Voices allocate per story with the narrator's voice reserved book-wide, so stories reuse voices but a story does not.
+
 ## Book characters
 
 - Analyze produces provisional candidates from samples. Chapters saves evidence-backed speaker observations under `chapter-characters/` while processing full chapter text.
@@ -106,6 +117,7 @@ work/                  # gitignored per-book artifacts; work/alice/ is a sample 
 - The bundled version-2 catalogue supports listing and applying OpenAI/Fish bindings. Version 1 uses `maxChars`; version 2 uses structured `inputLimits`, where `null` means unknown. These metadata limits do not automatically replace the adapter's `config.ttsMaxChars` request splitter.
 - `voices refresh` and legacy-array `voices import` write version-1 libraries and refuse to overwrite version 2. Use a separate library file. Fish refresh and synthesis are unimplemented; OpenRouter targets also require a separate compatible library.
 - Keep desired profiles in version-2 `casting.json` separate from concrete version-1 `voice-bindings.json`. Applying voices validates all scripted speakers and backs up legacy casting to `casting.legacy.json` before migration.
+- Voice allocation resets its used-voice set per story. Do not reintroduce a book-wide set: a collection has far more characters than any catalogue has voices, and characters in separate stories never share a scene.
 - Preserve compatible manual bindings; incompatible manual choices must fail explicitly. Preserve catalogue metadata/annotations and unknown traits instead of inventing values. Model availability in the catalogue does not establish a working synthesis adapter.
 
 ## Gotchas

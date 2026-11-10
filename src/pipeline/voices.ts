@@ -2,8 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import type { WorkDir } from '../state.js';
-import { CastingSchema, ChapterScriptSchema, VoiceBindingsSchema, type BookMetadata, type CastSpeaker, type Casting, type VoiceBinding, type VoiceBindings } from '../types.js';
+import { BOOK_STORY_ID, CastingSchema, ChapterScriptSchema, VoiceBindingsSchema, type BookMetadata, type CastSpeaker, type Casting, type VoiceBinding, type VoiceBindings } from '../types.js';
 import { config } from '../config.js';
+import { readCharacterRegistry } from './list-characters.js';
+import { readStories } from './stories.js';
 import { defaultVoiceTarget, loadVoiceLibrary, modelId, type LibraryVoice, type VoiceTarget } from '../voices/library.js';
 import { reportProgress } from '../util/progress.js';
 
@@ -28,17 +30,25 @@ export function runVoices(work: WorkDir, target = defaultVoiceTarget(), libraryF
   const existing = fs.existsSync(work.path('voice-bindings.json'))
     ? VoiceBindingsSchema.parse(work.readJson('voice-bindings.json'))
     : undefined;
-  const used = new Set<string>();
+  const groups = speakerGroups(work, Object.keys(casting.characters));
   const totalSpeakers = Object.keys(casting.characters).length + 1;
   reportProgress({ activity: 'Matching narrator and character voices', completedUnits: 0, totalUnits: totalSpeakers, unit: 'speakers matched' });
-  const narrator = chooseBinding(casting.narrator, existing?.narrator, candidates, target, model.supportsInstructions, used, bookLanguage);
-  used.add(narrator.libraryVoiceId);
+  // The narrator's voice is reserved for the whole book; character voices are
+  // allocated story by story. Two characters in one story should not share a
+  // voice while the catalogue still has one free, but characters in separate
+  // stories never share a scene and can safely reuse the same voice.
+  const reserved = new Set<string>();
+  const narrator = chooseBinding(casting.narrator, existing?.narrator, candidates, target, model.supportsInstructions, reserved, bookLanguage);
+  reserved.add(narrator.libraryVoiceId);
   reportProgress({ activity: 'Matched narrator voice', completedUnits: 1, totalUnits: totalSpeakers, unit: 'speakers matched' });
   const characters: Record<string, VoiceBinding> = {};
-  for (const [name, speaker] of Object.entries(casting.characters)) {
-    characters[name] = chooseBinding(speaker, existing?.characters[name], candidates, target, model.supportsInstructions, used, bookLanguage);
-    used.add(characters[name].libraryVoiceId);
-    reportProgress({ activity: `Matched voice for ${name}`, completedUnits: Object.keys(characters).length + 1, totalUnits: totalSpeakers, unit: 'speakers matched' });
+  for (const group of groups) {
+    const used = new Set(reserved);
+    for (const name of group) {
+      characters[name] = chooseBinding(casting.characters[name], existing?.characters[name], candidates, target, model.supportsInstructions, used, bookLanguage);
+      used.add(characters[name].libraryVoiceId);
+      reportProgress({ activity: `Matched voice for ${name}`, completedUnits: Object.keys(characters).length + 1, totalUnits: totalSpeakers, unit: 'speakers matched' });
+    }
   }
   const bindings: VoiceBindings = {
     version: 1,
@@ -77,6 +87,28 @@ export function validateVoiceBindings(work: WorkDir): VoiceBindings {
     }
   }
   return bindings;
+}
+
+/**
+ * Cast names grouped by story, in casting order. A hand-written cast with no
+ * character registry, and a continuous work, are a single group.
+ */
+function speakerGroups(work: WorkDir, names: string[]): string[][] {
+  let storyOfName: Map<string, string> | undefined;
+  try {
+    if (readStories(work).collection) {
+      storyOfName = new Map(readCharacterRegistry(work).characters.map((character) => [character.name, character.story || BOOK_STORY_ID]));
+    }
+  } catch {
+    // Voices can be applied to a cast that has no registry beside it.
+  }
+  if (!storyOfName) return names.length ? [names] : [];
+  const groups = new Map<string, string[]>();
+  for (const name of names) {
+    const story = storyOfName.get(name) ?? BOOK_STORY_ID;
+    groups.set(story, [...(groups.get(story) ?? []), name]);
+  }
+  return [...groups.values()];
 }
 
 function validateScriptSpeakers(work: WorkDir, casting: Casting): void {

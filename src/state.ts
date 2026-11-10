@@ -13,6 +13,8 @@ export interface WorkState {
   completed: Partial<Record<Stage, string>>; // stage -> ISO timestamp
   /** The currently selected file differs from the source that produced the completed stages. */
   sourceChanged?: boolean;
+  /** User override for short story collection handling; detection is used when unset. */
+  collection?: boolean;
   /** Completion timestamps for stages that can be run a chapter at a time. */
   chapterCompleted?: Partial<Record<'chapters' | 'script' | 'synth', Record<string, string>>>;
   /** Hash of the cast and concrete bindings used by the last completed synthesis. */
@@ -118,6 +120,20 @@ export class WorkDir {
     this.acceptCurrentSource();
   }
 
+  /** The user's collection override, or undefined when Analyze's detection applies. */
+  collection(): boolean | undefined {
+    return this.state.collection;
+  }
+
+  /** Record an explicit collection choice. Returns true when it changed. */
+  setCollection(collection: boolean | undefined): boolean {
+    if (this.state.collection === collection) return false;
+    if (collection === undefined) delete this.state.collection;
+    else this.state.collection = collection;
+    this.save();
+    return true;
+  }
+
   metadataOverrides(): SourceMetadataOverrides | undefined {
     return this.state.metadataOverrides ? structuredClone(this.state.metadataOverrides) : undefined;
   }
@@ -151,6 +167,32 @@ export class WorkDir {
 
     if (allIndexes.length > 0 && allIndexes.every((index) => byChapter[String(index)])) {
       this.state.completed[stage] = timestamp;
+    } else {
+      delete this.state.completed[stage];
+    }
+    this.save();
+  }
+
+  /** Clear completion for one stage only, leaving every other stage untouched. */
+  invalidateStage(stage: Stage): void {
+    delete this.state.completed[stage];
+    if (STAGES.indexOf(stage) <= STAGES.indexOf('synth')) delete this.state.synthesisInputHash;
+    this.save();
+  }
+
+  /**
+   * Keep only the listed chapters' completion for a chapter-scoped stage.
+   * Partial invalidation uses this so unaffected chapters are not re-run.
+   */
+  retainChaptersDone(stage: 'chapters' | 'script' | 'synth', keep: number[], allIndexes: number[]): void {
+    const completed = (this.state.chapterCompleted ??= {});
+    const byChapter = completed[stage] ?? {};
+    const retained = Object.fromEntries(
+      Object.entries(byChapter).filter(([index]) => keep.includes(Number(index)))
+    );
+    completed[stage] = retained;
+    if (allIndexes.length > 0 && allIndexes.every((index) => retained[String(index)])) {
+      this.state.completed[stage] = new Date().toISOString();
     } else {
       delete this.state.completed[stage];
     }

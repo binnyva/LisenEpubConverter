@@ -71,7 +71,7 @@ export function progressMessage(progress: ChapterProgress): string {
     preparing: 'Preparing script',
     attributing: `Attributing block ${progress.block}/${progress.totalBlocks} (${percent}% of text processed)`,
     repairing: `Repairing narration boundaries in ${progress.auditedSegments} segment(s)`,
-    verifying: `Attribution complete. Verifying ${progress.ambiguousSegments} uncertain speaker assignment(s)`,
+    verifying: `Attribution complete. Verifying ${progress.ambiguousSegments} speaker assignment(s)`,
     saving: 'Text processed. Saving script',
     completed: 'Chapter complete',
     skipped: 'Reusing existing script',

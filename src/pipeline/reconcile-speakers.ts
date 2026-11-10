@@ -3,13 +3,17 @@ import path from 'node:path';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { jsonCall } from '../providers/llm/openai.js';
-import type { ScriptSegment, BookMetadata, ChapterSummaries } from '../types.js';
+import { BOOK_STORY_ID, type ScriptSegment, type BookMetadata, type ChapterSummaries } from '../types.js';
 import type { WorkDir } from '../state.js';
 import { readCharacterRegistry } from './list-characters.js';
+import { readStories, readStoriesFile, storyIdFor } from './stories.js';
+import type { Stories } from '../types.js';
 
 export interface UnresolvedSpeaker {
   /** Stable within a work folder and shared with the workspace UI. */
   key: string;
+  /** Story scope the dialogue belongs to; resolutions stay inside it. */
+  story: string;
   speaker: string;
   chapters: number[];
   samples: Array<Pick<ScriptSegment, 'text' | 'delivery' | 'confidence'> & { chapter: number }>;
@@ -40,17 +44,35 @@ const normalize = (value: string): string => value.normalize('NFKC').trim().toLo
 
 /** Read the stopped Script stage's evidence without trusting file names or malformed output. */
 export function unresolvedSpeakers(work: WorkDir): UnresolvedSpeaker[] {
-  const directory = work.path('character-candidates');
+  let stories: Stories | undefined;
+  try {
+    stories = readStories(work);
+  } catch {
+    // A work folder without metadata still has reviewable candidates.
+    stories = undefined;
+  }
+  return unresolvedSpeakersIn(work.root, stories);
+}
+
+/** The same review list from a work folder path, for the local UI. */
+export function unresolvedSpeakersIn(root: string, grouping?: Stories): UnresolvedSpeaker[] {
+  const directory = path.join(root, 'character-candidates');
   if (!fs.existsSync(directory)) return [];
+  const stories = grouping ?? readStoriesFile(root);
   const groups = new Map<string, UnresolvedSpeaker>();
   for (const file of fs.readdirSync(directory).filter((name) => name.endsWith('.json'))) {
-    let data: { index?: unknown; candidates?: unknown };
+    let data: { index?: unknown; story?: unknown; candidates?: unknown };
     try {
-      data = JSON.parse(fs.readFileSync(path.join(directory, file), 'utf8')) as { index?: unknown; candidates?: unknown };
+      data = JSON.parse(fs.readFileSync(path.join(directory, file), 'utf8')) as { index?: unknown; story?: unknown; candidates?: unknown };
     } catch {
       continue;
     }
     if (!Number.isInteger(data.index) || !Array.isArray(data.candidates)) continue;
+    // One name can belong to two different people in two stories, so an
+    // unresolved speaker is reviewed within the story it was found in.
+    const story = typeof data.story === 'string' && data.story
+      ? data.story
+      : (stories ? storyIdFor(stories, data.index as number) : BOOK_STORY_ID);
     for (const item of data.candidates) {
       if (!item || typeof item !== 'object') continue;
       const segment = item as Partial<ScriptSegment>;
@@ -59,12 +81,13 @@ export function unresolvedSpeakers(work: WorkDir): UnresolvedSpeaker[] {
       if (!speaker || !text) continue;
       const id = normalize(speaker);
       if (!id || id === 'narrator') continue;
-      const group = groups.get(id) ?? { key: `candidate-${id}`, speaker, chapters: [], samples: [] };
+      const group = groups.get(`${story}\x1f${id}`)
+        ?? { key: `candidate-${story}-${id}`, story, speaker, chapters: [], samples: [] };
       if (!group.chapters.includes(data.index as number)) group.chapters.push(data.index as number);
       if (group.samples.length < 3) {
         group.samples.push({ chapter: data.index as number, text, delivery: segment.delivery, confidence: segment.confidence ?? 'low' });
       }
-      groups.set(id, group);
+      groups.set(`${story}\x1f${id}`, group);
     }
   }
   return [...groups.values()].sort((a, b) => a.speaker.localeCompare(b.speaker));
@@ -91,7 +114,29 @@ export async function reconcileUnresolvedSpeakers(work: WorkDir): Promise<Speake
   const registry = readCharacterRegistry(work);
   const metadata = work.readJson<BookMetadata>('metadata.json');
   const summaries = work.readJson<ChapterSummaries>('chapter-summaries.json');
-  const characters = registry.characters.map((character) => ({
+  const byStory = new Map<string, UnresolvedSpeaker[]>();
+  for (const candidate of candidates) {
+    byStory.set(candidate.story, [...(byStory.get(candidate.story) ?? []), candidate]);
+  }
+  const resolutions: SpeakerResolution[] = [];
+  for (const [story, group] of byStory) {
+    resolutions.push(...await reconcileStory(registry.characters.filter((character) => (character.story || BOOK_STORY_ID) === story), group, metadata, summaries));
+  }
+  const byKey = new Map(resolutions.map((resolution) => [resolution.key, resolution]));
+  return candidates.map((candidate) => byKey.get(candidate.key)
+    ?? { key: candidate.key, speaker: candidate.speaker, resolution: 'unresolved', reason: 'The reconciliation pass did not return a decision.', evidence: '' });
+}
+
+type RegistryCharacter = ReturnType<typeof readCharacterRegistry>['characters'][number];
+
+/** One conservative pass over the unresolved speakers of a single story. */
+async function reconcileStory(
+  scoped: RegistryCharacter[],
+  candidates: UnresolvedSpeaker[],
+  metadata: BookMetadata,
+  summaries: ChapterSummaries,
+): Promise<SpeakerResolution[]> {
+  const characters = scoped.map((character) => ({
     name: character.name, aliases: character.aliases, chapters: character.chapters,
     evidence: character.evidence.slice(-3),
   }));
@@ -110,7 +155,7 @@ Rules:
   });
 
   const bySpeaker = new Map(result.resolutions.map((resolution) => [normalize(resolution.speaker), resolution]));
-  const byName = new Map(registry.characters.map((character) => [normalize(character.name), character]));
+  const byName = new Map(scoped.map((character) => [normalize(character.name), character]));
   return candidates.map((candidate) => {
     const proposal = bySpeaker.get(normalize(candidate.speaker));
     if (!proposal) return { ...candidate, resolution: 'unresolved', reason: 'The reconciliation pass did not return a decision.', evidence: '' };

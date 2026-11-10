@@ -104,6 +104,28 @@ describe('book character registry', () => {
     expect(next.characters[0].id).toBe(first.characters[0].id);
     expect(llm).not.toHaveBeenCalled();
   });
+
+  it('preserves reviewed names, aliases, and manually added speakers on rerun', () => {
+    const { work } = fixture(1);
+    work.writeJson(characterChapterFile(0), chapter(0, [observation('Alice')]));
+    const first = runListCharacters(work);
+    const reviewed = structuredClone(first);
+    reviewed.characters[0].name = 'Alicia';
+    reviewed.characters[0].aliases = ['Alice', 'Al'];
+    reviewed.characters.push({ ...structuredClone(first.characters[0]),
+      id: 'manual-mother', name: 'Mother', aliases: ["Unnamed woman's mother"],
+      evidence: [{ chapter: 0, chunk: 0, text: 'Mother speaks.' }] });
+    work.writeJson('characters.json', reviewed);
+
+    const next = runListCharacters(work);
+
+    expect(next.characters.find((person) => person.id === first.characters[0].id)).toMatchObject({
+      name: 'Alicia', aliases: expect.arrayContaining(['Alice', 'Al']),
+    });
+    expect(next.characters.find((person) => person.id === 'manual-mother')).toMatchObject({
+      name: 'Mother', aliases: ["Unnamed woman's mother"],
+    });
+  });
 });
 
 describe('character discovery orchestration', () => {
@@ -221,6 +243,17 @@ describe('character discovery orchestration', () => {
     expect(llm).not.toHaveBeenCalled();
   });
 
+  it('turns reasoning off when cleaning a new non-fiction chapter', async () => {
+    const { work, options } = fixture(1);
+    work.writeJson('analysis.json', { ...work.readJson<object>('analysis.json'), isFiction: false });
+    llm.mockResolvedValue({ cleanedText: 'Chapter 0: Hello.', partialSummary: 'A greeting.', characters: [] });
+
+    await runStage({ ...options, stage: 'chapters' });
+
+    expect(llm).toHaveBeenCalledWith(expect.objectContaining({ disableReasoning: true }));
+    expect(fs.readFileSync(work.path('chapters-clean/00.md'), 'utf8')).toBe('Chapter 0: Hello.');
+  });
+
   it('does not recover the new stage from legacy scripts alone', () => {
     const { work } = fixture(1);
     work.invalidateFrom('extract');
@@ -235,6 +268,31 @@ describe('character discovery orchestration', () => {
 });
 
 describe('registry consumers', () => {
+  it('resolves chapter-scoped and reviewed speaker labels after List Characters reruns', async () => {
+    const { work } = fixture(1);
+    work.writeJson(characterChapterFile(0), chapter(0, [
+      observation("Unnamed woman (Boss's wife)", { named: false }),
+      observation("Unnamed woman (Young girl's mother)", { named: false }),
+    ]));
+    const registry = runListCharacters(work);
+    registry.characters.push({ ...structuredClone(registry.characters[0]),
+      id: 'manual-young-girls-mother', name: "Young girl's mother", aliases: ["Unnamed woman's mother"] });
+    work.writeJson('characters.json', registry);
+    runListCharacters(work);
+    work.writeJson('chapter-summaries.json', { 0: 'A guest speaks.' });
+    fs.writeFileSync(work.dir('chapters-clean') + '/00.md', '"Hello." "Goodbye."');
+    llm.mockResolvedValueOnce({ segments: [
+      { speaker: "Unnamed woman (Boss's wife)", text: '"Hello."', confidence: 'high' },
+      { speaker: "Unnamed woman's mother", text: '"Goodbye."', confidence: 'high' },
+    ] });
+
+    await runScript(work);
+
+    expect(work.readJson<any>('script/00.json').segments.map((part: any) => part.speaker)).toEqual([
+      "Unnamed woman (Boss's wife) (chapter 1)", "Young girl's mother",
+    ]);
+  });
+
   it('recovers explicit tagged dialogue when the repair model leaves it under narrator', async () => {
     const { work } = fixture(1);
     work.writeJson(characterChapterFile(0), chapter(0, [observation('Alice')]));

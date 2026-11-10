@@ -7,6 +7,7 @@ import type { WorkDir } from '../state.js';
 import type { Analysis, BookMetadata, ChapterSummaries } from '../types.js';
 import { CharacterObservationSchema, ChapterCharactersSchema, type ChapterCharacters } from '../types.js';
 import { buildCharacterRegistry, characterChapterFile } from './list-characters.js';
+import { readStories, storyFor } from './stories.js';
 import { reportProgress, type ChapterProgress } from '../util/progress.js';
 
 const DiscoverySchema = z.object({ characters: z.array(CharacterObservationSchema) });
@@ -108,6 +109,7 @@ export function mergeChapterObservations(
 export async function runChapters(work: WorkDir, chapterIndexes?: number[]): Promise<void> {
   const meta = work.readJson<BookMetadata>('metadata.json');
   const analysis = work.readJson<Analysis>('analysis.json');
+  const stories = readStories(work);
   work.dir('chapters-clean');
 
   const summaries: ChapterSummaries = fs.existsSync(work.path(SUMMARIES_FILE))
@@ -158,7 +160,12 @@ export async function runChapters(work: WorkDir, chapterIndexes?: number[]): Pro
     const blocks = splitIntoBlocks(text, config.llmChunkChars);
     totalChars = blocks.reduce((sum, block) => sum + block.length, 0);
 
+    // In a collection, another story's summaries and cast are noise that
+    // invites the model to reuse a name across unrelated stories.
+    const storyChapters = storyFor(stories, ch.index)?.chapters ?? [];
+    const inScope = (index: number): boolean => !stories.collection || storyChapters.includes(index);
     const recentSummaries = Object.entries(summaries)
+      .filter(([index]) => inScope(Number(index)))
       .slice(-5)
       .map(([i, s]) => `Chapter ${i}: ${s}`)
       .join('\n');
@@ -168,16 +175,19 @@ export async function runChapters(work: WorkDir, chapterIndexes?: number[]): Pro
     const discoveries: ChapterCharacters = { index: ch.index, observations: [] };
     const earlierDiscoveries = meta.chapters
       .filter((earlier) => earlier.index < ch.index && analysis.chapters.some((plan) => plan.index === earlier.index && plan.narrate))
+      .filter((earlier) => inScope(earlier.index))
       .filter((earlier) => fs.existsSync(work.path(characterChapterFile(earlier.index))))
       .map((earlier) => ChapterCharactersSchema.parse(work.readJson(characterChapterFile(earlier.index))));
     for (const [i, block] of blocks.entries()) {
       progress(`${hasCleanOutput ? 'Discovering speakers in' : 'Cleaning and summarizing'} block ${i + 1}/${blocks.length} — waiting for model response`);
       const knownCharacters = buildCharacterRegistry([...earlierDiscoveries, discoveries]).characters
         .map(({ name, aliases, chapters }) => ({ name, aliases, chapters }));
-      const context = `Book: "${meta.title}" (${analysis.isFiction ? 'fiction' : 'non-fiction'})
+      const context = `Book: "${meta.title}" (${analysis.isFiction ? 'fiction' : 'non-fiction'}${stories.collection ? ', a collection of separate short stories' : ''})
 Book summary (provisional): ${analysis.summary}
-Initial character candidates: ${JSON.stringify(analysis.characters)}
-Characters discovered so far (context only; report observations from THIS text): ${JSON.stringify(knownCharacters)}
+${stories.collection
+  ? `This chapter belongs to the story "${storyFor(stories, ch.index)?.title ?? ch.title}". Characters from other stories in this book are different people, even when they share a name.`
+  : `Initial character candidates: ${JSON.stringify(analysis.characters)}`}
+Characters discovered so far in this story (context only; report observations from THIS text): ${JSON.stringify(knownCharacters)}
 ${recentSummaries ? `Recent chapter summaries:\n${recentSummaries}\n` : ''}
 Chapter ${ch.index}: "${ch.title}" (part ${i + 1} of ${blocks.length})
 Text:\n${block}`;
@@ -185,6 +195,7 @@ Text:\n${block}`;
         // Backfill old runs without paying to clean the chapter again or altering saved prose.
         const result = await jsonCall({
           model: config.chapterModel,
+          disableReasoning: !analysis.isFiction,
           schema: DiscoverySchema,
           system: `Identify audiobook speakers. Respond with JSON: {"characters": [...]}\n${CHARACTER_RULES}`,
           user: context,
@@ -195,6 +206,7 @@ Text:\n${block}`;
       }
       const result = await jsonCall({
         model: config.chapterModel,
+        disableReasoning: !analysis.isFiction,
         schema: ChunkResultSchema,
         system: `You prepare book chapters for audiobook narration. Respond with JSON: {"cleanedText": "...", "partialSummary": "...", "characters": [...]}.
 

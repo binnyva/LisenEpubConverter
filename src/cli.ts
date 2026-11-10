@@ -18,6 +18,7 @@ import { config, STAGES, type Stage } from './config.js';
 import { openWorkDir } from './state.js';
 import { checkApiKeys, checkFfmpeg } from './checks.js';
 import { discoverBooks, runStage } from './pipeline/runner.js';
+import { readStoriesFile } from './pipeline/stories.js';
 import { startLocalUi } from './ui/server.js';
 import { defaultVoiceTarget, importVoiceLibrary, loadVoiceLibrary, refreshVoiceLibrary, type VoiceTarget } from './voices/library.js';
 import { sourceFormatForPath, sourceIsAvailable, supportedSourceDescription, type SourceMetadataOverrides } from './source/read.js';
@@ -38,6 +39,8 @@ program
   .option('--title <title>', 'override title extracted from the source')
   .option('--author <author>', 'override author extracted from the source')
   .option('--language <language>', 'override source language (for example en or pt-BR)')
+  .option('--collection', 'treat the source as a short story collection: characters are scoped per story')
+  .option('--no-collection', 'treat the source as one continuous work')
   .action(async (source: string, opts) => {
     assertSource(source);
     if (!sourceIsAvailable(source)) {
@@ -74,6 +77,7 @@ program
         stage,
         rebuild: (opts.force || Boolean(opts.from)) && index === startAt,
         metadataOverrides: sourceMetadataFromOptions(opts),
+        collection: opts.collection,
         onEvent: (event) => console.log(`[${event.stage}] ${event.message}`),
       });
       if (result.output) console.log(`\nDone: ${result.output}`);
@@ -92,11 +96,18 @@ program
       process.exit(1);
     }
     const work = await openWorkDir(source, opts.work);
+    const stories = readStoriesFile(work.root);
     if (opts.json) {
-      console.log(JSON.stringify({ root: work.root, state: work.snapshot(), stages: work.status() }, null, 2));
+      console.log(JSON.stringify({ root: work.root, state: work.snapshot(), stages: work.status(), stories }, null, 2));
       return;
     }
-    console.log(`Work directory: ${work.root}\n`);
+    console.log(`Work directory: ${work.root}`);
+    if (stories) {
+      console.log(stories.collection
+        ? `Short story collection: ${stories.stories.length} stories, each with its own cast`
+        : 'One continuous work');
+    }
+    console.log('');
     for (const { stage, done, at } of work.status()) {
       console.log(`  ${done ? '✔' : '·'} ${stage}${at ? `  (${at})` : ''}`);
     }
@@ -126,6 +137,7 @@ program
   .argument('<source>', `path to a source file (${supportedSourceDescription()})`)
   .argument('<stage>', `stage to run (${STAGES.join(', ')})`)
   .option('--chapters <indexes>', 'comma-separated chapter indexes (for chapters, script, synth, or assemble)')
+  .option('--story <numbers>', 'comma-separated 1-based story numbers, as an alternative to --chapters')
   .option('--rerun', 'execute the stage even if it is already complete')
   .option('--rebuild', 'clear this stage and all derived output before running')
   .option('--out <dir>', 'output directory for assembled M4Bs (default: the book work folder)')
@@ -134,6 +146,8 @@ program
   .option('--title <title>', 'override title extracted from the source')
   .option('--author <author>', 'override author extracted from the source')
   .option('--language <language>', 'override source language (for example en or pt-BR)')
+  .option('--collection', 'treat the source as a short story collection: characters are scoped per story')
+  .option('--no-collection', 'treat the source as one continuous work')
   .action(async (source: string, stage: string, opts) => {
     if (!STAGES.includes(stage as Stage)) throw new Error(`Unknown stage "${stage}". Stages: ${STAGES.join(', ')}`);
     assertSource(source);
@@ -141,15 +155,19 @@ program
     if (stage === 'assemble') checkFfmpeg();
     if (['analyze', 'chapters', 'script', 'casting'].includes(stage)) checkApiKeys([config.llmProvider]);
     if (stage === 'synth') checkApiKeys([config.ttsProvider]);
-    const chapters = opts.chapters
-      ? String(opts.chapters).split(',').map((value) => Number.parseInt(value.trim(), 10))
-      : undefined;
+    const numbers = (value: unknown): number[] | undefined => value === undefined
+      ? undefined
+      : String(value).split(',').map((item) => Number.parseInt(item.trim(), 10));
+    const chapters = numbers(opts.chapters);
+    const stories = numbers(opts.story);
     const result = await runStage({
       sourcePath: source,
       workRoot: opts.work,
       outDir: opts.out,
       stage: stage as Stage,
       chapterIndexes: chapters,
+      storyIndexes: stories,
+      collection: opts.collection,
       rerun: opts.rerun,
       rebuild: opts.rebuild,
       metadataOverrides: sourceMetadataFromOptions(opts),

@@ -50,12 +50,42 @@ export const ChapterPlanSchema = z.object({
 
 export const AnalysisSchema = z.object({
   isFiction: z.boolean(),
+  /** A short story collection or anthology: each story has its own cast. */
+  isCollection: z.boolean().default(false),
+  /** Short justification for the collection decision, for review. */
+  collectionReason: z.string().default(''),
+  /** Proposed story grouping for a collection; narratable chapters only. */
+  stories: z.array(z.object({
+    title: z.string().default(''),
+    chapters: z.array(z.number().int().nonnegative()).default([]),
+  })).default([]),
   summary: z.string(),
   characters: z.array(PersonProfileSchema).default([]),
   author: PersonProfileSchema,
   chapters: z.array(ChapterPlanSchema),
 });
 export type Analysis = z.infer<typeof AnalysisSchema>;
+
+// ---------- Story grouping ----------
+
+/** A single continuous work is one story covering every narratable chapter. */
+export const BOOK_STORY_ID = 'book';
+
+export const StorySchema = z.object({
+  id: z.string(),
+  title: z.string().default(''),
+  /** Narratable chapter indexes belonging to this story, ascending. */
+  chapters: z.array(z.number().int().nonnegative()).default([]),
+});
+export type Story = z.infer<typeof StorySchema>;
+
+export const StoriesSchema = z.object({
+  version: z.literal(1).default(1),
+  /** Characters are scoped per story when true. */
+  collection: z.boolean().default(false),
+  stories: z.array(StorySchema).default([]),
+});
+export type Stories = z.infer<typeof StoriesSchema>;
 
 // ---------- Stage 3: chapters ----------
 
@@ -82,10 +112,15 @@ export type ChapterCharacters = z.infer<typeof ChapterCharactersSchema>;
 // ---------- Stage 4: list characters ----------
 
 export const CharacterRegistrySchema = z.object({
-  version: z.literal(1),
+  /** Version 1 had no story scope; readCharacterRegistry() migrates it. */
+  version: z.union([z.literal(1), z.literal(2)]).default(2),
   chapters: z.array(z.number().int().nonnegative()),
+  /** Story scopes the characters were consolidated within. */
+  stories: z.array(z.object({ id: z.string(), title: z.string().default('') })).default([]),
   characters: z.array(PersonProfileSchema.extend({
     id: z.string(),
+    /** Story scope id. Empty in version-1 registries and hand edits. */
+    story: z.string().default(''),
     chapters: z.array(z.number().int().nonnegative()),
     evidence: z.array(z.object({ chapter: z.number(), chunk: z.number(), text: z.string() })),
     issues: z.array(z.string()),
@@ -108,6 +143,11 @@ export type ScriptSegment = z.infer<typeof ScriptSegmentSchema>;
 
 export const ChapterScriptSchema = z.object({
   index: z.number(),
+  /** Story scope this chapter was attributed within. */
+  story: z.string().optional(),
+  /** Hash of this story's characters. Replaces characterRegistryHash. */
+  characterScopeHash: z.string().optional(),
+  /** Whole-registry hash written before story scopes existed. */
   characterRegistryHash: z.string().optional(),
   segments: z.array(ScriptSegmentSchema),
 });

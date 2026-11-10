@@ -1,13 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { STAGES, withLlmRunConfig, type ProviderId, type Stage } from '../config.js';
+import { STAGES, withLlmRunConfig, type OpenRouterReasoningEffort, type ProviderId, type Stage } from '../config.js';
 import { WorkDir, openWorkDir } from '../state.js';
-import type { Analysis, BookMetadata } from '../types.js';
+import type { Analysis, BookMetadata, ChapterScript, Stories } from '../types.js';
 import { runAnalyze } from './analyze.js';
 import { runAssemble } from './assemble.js';
 import { runCasting } from './casting.js';
 import { runChapters } from './chapters.js';
-import { CHARACTER_REGISTRY_FILE, characterChapterFile, characterRegistryHash, readCharacterRegistry, runListCharacters } from './list-characters.js';
+import { CHARACTER_REGISTRY_FILE, characterChapterFile, characterScopeHash, characterScopeHashes, legacyCharacterRegistryHash, readCharacterRegistry, runListCharacters } from './list-characters.js';
+import { STORIES_FILE, buildStories, chaptersForStoryNumbers, readStories, storyIdFor, validateStories, writeStories } from './stories.js';
 import { runExtract } from './extract.js';
 import { runScript } from './script.js';
 import { runSynth } from './synth.js';
@@ -33,6 +34,9 @@ export interface RunStageOptions {
   llmProvider?: ProviderId;
   /** Override the text-processing model for this one run. */
   llmModel?: string;
+  /** Override Script's model and reasoning effort for this one run. */
+  scriptModel?: string;
+  scriptReasoningEffort?: OpenRouterReasoningEffort;
   voiceTarget?: VoiceTarget;
   voiceLibraryFile?: string;
   sourcePath?: string;
@@ -43,7 +47,11 @@ export interface RunStageOptions {
   outDir?: string;
   stage: Stage;
   metadataOverrides?: SourceMetadataOverrides;
+  /** Explicit short story collection choice; detection applies when omitted. */
+  collection?: boolean;
   chapterIndexes?: number[];
+  /** 1-based story numbers, resolved to their chapters. Excludes chapterIndexes. */
+  storyIndexes?: number[];
   /** Execute the stage even when its completion record and output already exist. */
   rerun?: boolean;
   rebuild?: boolean;
@@ -71,7 +79,7 @@ const CHAPTER_STAGES = new Set<Stage>(['chapters', 'script', 'synth']);
 
 /** Run exactly one stage. The CLI and local UI both use this instead of duplicating orchestration. */
 export async function runStage(options: RunStageOptions): Promise<RunStageResult> {
-  return withTaskCancellation(options.signal, () => withLlmRunConfig({ provider: options.llmProvider, model: options.llmModel }, () => withWarningReporter((message) => {
+  return withTaskCancellation(options.signal, () => withLlmRunConfig({ provider: options.llmProvider, model: options.llmModel, scriptModel: options.scriptModel, scriptReasoningEffort: options.scriptReasoningEffort }, () => withWarningReporter((message) => {
     if (options.onEvent) options.onEvent({ type: 'warning', stage: options.stage, message });
     else console.warn(`  ${message}`);
   }, () => withStageProgress((progress, message, heartbeat) => {
@@ -90,7 +98,8 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
 
   const work = await openWorkDir(sourcePath, workRoot, options.metadataOverrides);
   if (options.metadataOverrides) work.setMetadataOverrides(options.metadataOverrides);
-  const chapterIndexes = normalizeChapterIndexes(options.chapterIndexes);
+  if (options.collection !== undefined) applyCollectionSetting(work, options.collection);
+  const chapterIndexes = normalizeChapterIndexes(selectedChapters(work, options));
   if (chapterIndexes && stage === 'list-characters') {
     throw new Error('List Characters uses all narratable chapters; omit --chapters.');
   }
@@ -136,23 +145,36 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
       work.acceptCurrentSource();
       work.markDone(stage);
       break;
-    case 'analyze':
+    case 'analyze': {
+      const previousStories = readFileIfPresent(work.path(STORIES_FILE));
       await runAnalyze(work);
+      // Regrouped stories change every character scope below this stage.
+      if (previousStories !== undefined && previousStories !== readFileIfPresent(work.path(STORIES_FILE))) {
+        work.invalidateFrom('list-characters');
+        clearArtifactsFrom(work, 'list-characters');
+      }
       work.markDone(stage);
       break;
+    }
     case 'chapters':
       await runChapters(work, selected);
       markChapterStage(work, stage, selected);
       break;
     case 'list-characters': {
-      const previous = fs.existsSync(work.path(CHARACTER_REGISTRY_FILE))
-        ? fs.readFileSync(work.path(CHARACTER_REGISTRY_FILE), 'utf8') : undefined;
-      runListCharacters(work);
-      if (previous !== fs.readFileSync(work.path(CHARACTER_REGISTRY_FILE), 'utf8')) {
-        work.invalidateFrom('script');
-        // Old encoded chapters must not survive a change of speaker attribution.
-        clearArtifactsFrom(work, 'synth');
+      const stories = readStories(work);
+      let before: Map<string, string> | undefined;
+      if (fs.existsSync(work.path(CHARACTER_REGISTRY_FILE))) {
+        try {
+          before = characterScopeHashes(readCharacterRegistry(work), stories);
+        } catch {
+          // An unreadable registry cannot be compared, and this stage is the
+          // one that rebuilds it. Treat every story as changed instead of
+          // refusing to run.
+          before = new Map();
+        }
       }
+      const registry = runListCharacters(work);
+      invalidateChangedStories(work, before, characterScopeHashes(registry, stories), stories);
       work.markDone(stage);
       break;
     }
@@ -183,6 +205,84 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
   throwIfTaskCancelled();
   onEvent?.({ type: 'completed', stage, message: output ? `Created ${output}` : `${stage} complete.` });
   return { work, stage, skipped: false, output, chapterIndexes: selected };
+}
+
+/** Chapter selection, whether it was requested by chapter or by story. */
+function selectedChapters(work: WorkDir, options: RunStageOptions): number[] | undefined {
+  if (!options.storyIndexes?.length) return options.chapterIndexes;
+  if (options.chapterIndexes?.length) throw new Error('Select either chapters or stories, not both.');
+  if (!fs.existsSync(work.path('metadata.json')) || !fs.existsSync(work.path('analysis.json'))) {
+    throw new Error('Run analyze before selecting stories.');
+  }
+  return chaptersForStoryNumbers(readStories(work), options.storyIndexes);
+}
+
+function readFileIfPresent(file: string): string | undefined {
+  return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined;
+}
+
+/**
+ * Record an explicit collection choice and regroup the stories. The grouping
+ * is derived, so Analyze does not have to run again; the artifacts that depend
+ * on character scopes are cleared, keeping cleaned text and paid MP3s.
+ */
+function applyCollectionSetting(work: WorkDir, collection: boolean): void {
+  if (!work.setCollection(collection)) return;
+  if (!fs.existsSync(work.path('metadata.json')) || !fs.existsSync(work.path('analysis.json'))) return;
+  saveStoryGrouping(work, buildStories(collection, work.readJson<BookMetadata>('metadata.json'), work.readJson<Analysis>('analysis.json')));
+}
+
+/**
+ * Save a grouping and the collection choice it implies, then clear what
+ * depends on character scopes. Cleaned text, chapter observations and the paid
+ * MP3 cache are retained. Returns true when the grouping actually changed.
+ */
+export function saveStoryGrouping(work: WorkDir, next: Stories): boolean {
+  validateStories(next, work.readJson<BookMetadata>('metadata.json'), work.readJson<Analysis>('analysis.json'));
+  work.setCollection(next.collection);
+  const before = readFileIfPresent(work.path(STORIES_FILE));
+  writeStories(work, next);
+  if (before === readFileIfPresent(work.path(STORIES_FILE))) return false;
+  work.invalidateFrom('list-characters');
+  clearArtifactsFrom(work, 'list-characters');
+  return true;
+}
+
+/**
+ * Invalidate only the stories whose cast actually changed. One corrected
+ * character in a 25-story collection must not re-attribute, and then
+ * re-synthesize, every other story.
+ */
+function invalidateChangedStories(
+  work: WorkDir,
+  before: Map<string, string> | undefined,
+  after: Map<string, string>,
+  stories: Stories
+): void {
+  if (!before) return;
+  const sameScopes = before.size === after.size && [...after.keys()].every((id) => before.has(id));
+  const changed = [...after].filter(([id, hash]) => before.get(id) !== hash).map(([id]) => id);
+  if (sameScopes && !changed.length) return;
+  if (!sameScopes) {
+    // The grouping moved, so no script can be trusted to use the right scope.
+    work.invalidateFrom('script');
+    clearArtifactsFrom(work, 'synth');
+    return;
+  }
+  const affected = new Set(stories.stories.filter((story) => changed.includes(story.id)).flatMap((story) => story.chapters));
+  const all = narratableChapterIndexes(work);
+  for (const index of affected) {
+    const name = String(index).padStart(2, '0');
+    // Old encoded chapters must not survive a change of speaker attribution.
+    // Scripts are left in place; their scope hash no longer matches, so Script
+    // rewrites them, and the paid MP3 cache is untouched either way.
+    fs.rmSync(work.path(`audio/${name}.m4a`), { force: true });
+    fs.rmSync(work.path(`audio/${name}-segments.json`), { force: true });
+  }
+  const unaffected = all.filter((index) => !affected.has(index));
+  work.retainChaptersDone('script', unaffected, all);
+  work.retainChaptersDone('synth', unaffected, all);
+  for (const stage of ['casting', 'voices', 'assemble'] as const) work.invalidateStage(stage);
 }
 
 export function discoverBooks(workRoot: string): DiscoveredBook[] {
@@ -243,10 +343,16 @@ export function recoverStageStateFromArtifacts(work: WorkDir): boolean {
   if (!fs.existsSync(work.path(CHARACTER_REGISTRY_FILE))) return changed;
   work.markDone('list-characters');
 
-  const registryHash = characterRegistryHash(readCharacterRegistry(work));
+  const registry = readCharacterRegistry(work);
+  const stories = readStories(work);
+  const legacyHash = legacyCharacterRegistryHash(registry);
   const hasScripts = narratable.every((index) => {
     const file = `script/${String(index).padStart(2, '0')}.json`;
-    return fs.existsSync(work.path(file)) && work.readJson<{ characterRegistryHash?: string }>(file).characterRegistryHash === registryHash;
+    if (!fs.existsSync(work.path(file))) return false;
+    const script = work.readJson<ChapterScript>(file);
+    return script.characterScopeHash !== undefined
+      ? script.characterScopeHash === characterScopeHash(registry, storyIdFor(stories, index))
+      : script.characterRegistryHash === legacyHash;
   });
   if (!hasScripts) return changed;
   work.markChaptersDone('script', narratable, narratable);
@@ -265,8 +371,8 @@ export function recoverStageStateFromArtifacts(work: WorkDir): boolean {
 /** Remove derived output only for an explicit rebuild; audio cache is intentionally retained. */
 export function clearArtifactsFrom(work: WorkDir, stage: Stage): void {
   const files: Partial<Record<Stage, string[]>> = {
-    extract: ['chapters', 'metadata.json', 'analysis.json', 'chapters-clean', 'chapter-summaries.json', 'chapter-characters', 'characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
-    analyze: ['analysis.json', 'chapters-clean', 'chapter-summaries.json', 'chapter-characters', 'characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
+    extract: ['chapters', 'metadata.json', 'analysis.json', 'stories.json', 'chapters-clean', 'chapter-summaries.json', 'chapter-characters', 'characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
+    analyze: ['analysis.json', 'stories.json', 'chapters-clean', 'chapter-summaries.json', 'chapter-characters', 'characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
     chapters: ['chapters-clean', 'chapter-summaries.json', 'chapter-characters', 'characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
     'list-characters': ['characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
     script: ['character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],

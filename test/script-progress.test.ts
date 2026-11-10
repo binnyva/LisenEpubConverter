@@ -37,6 +37,48 @@ function fixture(isFiction = true) {
 }
 
 describe('script progress through the shared runner', () => {
+  it('saves valid boundary repairs when the model omits other segment ids', async () => {
+    const { options, work, events } = fixture();
+    llm.mockResolvedValueOnce({ segments: [
+      { speaker: 'narrator', text: '"Hello," she said.', confidence: 'high' },
+      { speaker: 'narrator', text: '"Bye," he answered.', confidence: 'high' },
+    ] });
+    llm.mockResolvedValueOnce({ repairs: [{ id: 0, segments: [
+      { speaker: 'Alice', text: '"Hello,"', confidence: 'high' },
+      { speaker: 'narrator', text: 'she said.', confidence: 'high' },
+    ] }] });
+    llm.mockResolvedValueOnce({ segments: [{ speaker: 'narrator', text: 'B', confidence: 'high' }] });
+
+    await runStage({ ...options, chapterIndexes: [0] });
+
+    const segments = work.readJson<any>('script/00.json').segments;
+    expect(segments).toContainEqual(expect.objectContaining({ speaker: 'Alice', text: '"Hello,"' }));
+    expect(segments).toContainEqual(expect.objectContaining({ speaker: 'narrator', text: '"Bye," he answered.', confidence: 'low' }));
+    expect(events.some((event) => event.type === 'warning' && event.message.includes('omitted segment(s) 1'))).toBe(true);
+  });
+
+  it('audits high-confidence dialogue with Script-only reasoning and marks corrections for review', async () => {
+    const { options, work } = fixture();
+    const registry = work.readJson<any>('characters.json');
+    registry.characters.push({
+      id: 'bob', name: 'Bob', aliases: [], sex: 'male', age: 'adult', importance: 'secondary',
+      chapters: [0], evidence: [], issues: [],
+    });
+    work.writeJson('characters.json', registry);
+    llm.mockResolvedValueOnce({ segments: [{ speaker: 'Alice', text: 'A', confidence: 'high' }] });
+    llm.mockResolvedValueOnce({ segments: [{ speaker: 'narrator', text: 'B', confidence: 'high' }] });
+    llm.mockResolvedValueOnce({ attributions: [{ id: 0, speaker: 'Bob' }] });
+
+    await runStage({ ...options, chapterIndexes: [0], llmModel: 'general-model',
+      scriptModel: 'reasoning-model', scriptReasoningEffort: 'medium' });
+
+    expect(llm).toHaveBeenCalledTimes(3);
+    for (const [request] of llm.mock.calls) {
+      expect(request).toMatchObject({ model: 'reasoning-model', reasoningEffort: 'medium', maxCompletionTokens: 8192 });
+    }
+    expect(work.readJson<any>('script/00.json').segments[0]).toMatchObject({ speaker: 'Bob', confidence: 'low' });
+  });
+
   it('reports character-weighted blocks, pending-request heartbeats, verification and selected-chapter completion', async () => {
     const { options, events, work } = fixture();
     let release!: (value: any) => void;
@@ -56,6 +98,8 @@ describe('script progress through the shared runner', () => {
     } });
     release({ segments: [{ speaker: 'Alice', text: 'A', confidence: 'low' }] });
     await run;
+    expect(llm.mock.calls[0][0].model).toBe(config.chapterModel);
+    expect(llm.mock.calls[2][0].model).toBe(config.analysisModel);
     expect(events.find((event) => event.progress?.block === 2)).toMatchObject({
       message: expect.stringContaining('72% of text processed'),
       progress: { processedChars: 8000, totalChars: 11000, completedChapters: 0, totalChapters: 2 },
@@ -84,7 +128,7 @@ describe('script progress through the shared runner', () => {
 
   it('reports non-fiction progress without requesting attribution', async () => {
     const { options, events } = fixture(false);
-    await runStage(options);
+    await runStage({ ...options, scriptReasoningEffort: 'high' });
     expect(llm).not.toHaveBeenCalled();
     expect(events.filter((event) => event.progress?.phase === 'completed').map((event) => event.progress?.completedChapters)).toEqual([1, 2]);
   });

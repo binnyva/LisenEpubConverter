@@ -36,6 +36,23 @@ function browser() {
 }
 
 describe('UI stage activity', () => {
+  it('shows a reasoning toggle and disables it for non-fiction books', () => {
+    const source = fs.readFileSync(new URL('../src/ui/server.ts', import.meta.url), 'utf8');
+    expect(source).toContain('<input type="checkbox" id="script-reasoning-enabled"');
+    const { nodes, context } = browser();
+    vm.runInContext(`modelSettings={provider:'openai',model:'text-model',scriptModel:'',scriptReasoningEffort:'high',models:[],modelsFile:'models.json',audio:{provider:'openai',model:'audio-model',models:[],modelsFile:'audio.json'}};book={analysis:{isFiction:false}};renderModelSettings()`, context);
+    expect(nodes.get('#script-reasoning-enabled')).toMatchObject({ checked: false, disabled: true });
+    expect(nodes.get('#script-reasoning-effort').disabled).toBe(true);
+    expect(vm.runInContext('selectedLlm().scriptReasoningEffort', context)).toBe('none');
+
+    vm.runInContext('book.analysis.isFiction=true;renderModelSettings()', context);
+    expect(nodes.get('#script-reasoning-enabled')).toMatchObject({ checked: true, disabled: false });
+    expect(nodes.get('#script-reasoning-effort')).toMatchObject({ value: 'high', disabled: false });
+    expect(vm.runInContext('selectedLlm().scriptReasoningEffort', context)).toBe('high');
+    vm.runInContext("document.querySelector('#script-reasoning-enabled').checked=false;syncReasoningControls()", context);
+    expect(nodes.get('#script-reasoning-effort').disabled).toBe(true);
+  });
+
   it('offers a close-task control only while a task is active', () => {
     const { nodes, context } = browser();
     context.current = { id: 'activity-1', epubPath: '/book.epub', stage: 'analyze', status: 'running', events: [] };

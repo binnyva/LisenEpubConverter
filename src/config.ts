@@ -5,6 +5,8 @@ export type ProviderId = 'openai' | 'openrouter';
 export interface LlmRunConfig {
   provider?: ProviderId;
   model?: string;
+  scriptModel?: string;
+  scriptReasoningEffort?: OpenRouterReasoningEffort;
 }
 
 /** OpenRouter prices in US dollars per million tokens. */
@@ -73,14 +75,17 @@ function openRouterMaxPriceFromEnv(): OpenRouterMaxPrice | undefined {
   return price;
 }
 
-function openRouterReasoningEffortFromEnv(): OpenRouterReasoningEffort {
-  const value = process.env.LISEN_OPENROUTER_REASONING_EFFORT ?? 'none';
+function parseReasoningEffort(value: string, name: string): OpenRouterReasoningEffort {
   if (['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(value)) {
     return value as OpenRouterReasoningEffort;
   }
   throw new Error(
-    `Invalid LISEN_OPENROUTER_REASONING_EFFORT "${value}". Expected none, minimal, low, medium, high, xhigh, or max.`
+    `Invalid ${name} "${value}". Expected none, minimal, low, medium, high, xhigh, or max.`
   );
+}
+
+function openRouterReasoningEffortFromEnv(): OpenRouterReasoningEffort {
+  return parseReasoningEffort(process.env.LISEN_OPENROUTER_REASONING_EFFORT ?? 'none', 'LISEN_OPENROUTER_REASONING_EFFORT');
 }
 
 export const config = {
@@ -102,6 +107,28 @@ export const config = {
     if (selected) return selected;
     return process.env.LISEN_CHAPTER_MODEL ?? 'gpt-4.1-mini';
   },
+  /** Model used only by Script attribution, boundary repair, and verification. */
+  get scriptModel(): string {
+    return llmRunConfig.getStore()?.scriptModel || process.env.LISEN_SCRIPT_MODEL || this.chapterModel;
+  },
+  /** Preserve the stronger analysis-model default for Script repair and review. */
+  get scriptReviewModel(): string {
+    return llmRunConfig.getStore()?.scriptModel || process.env.LISEN_SCRIPT_MODEL || this.analysisModel;
+  },
+  /** Script-only reasoning effort; none preserves the provider's default request behavior. */
+  get scriptReasoningEffort(): OpenRouterReasoningEffort {
+    const value = llmRunConfig.getStore()?.scriptReasoningEffort
+      ?? process.env.LISEN_SCRIPT_REASONING_EFFORT
+      ?? (this.llmProvider === 'openrouter' ? this.openRouterReasoningEffort : 'none');
+    return parseReasoningEffort(value, 'LISEN_SCRIPT_REASONING_EFFORT');
+  },
+  /** Leave space for reasoning tokens as well as the copied chapter text. */
+  get scriptMaxCompletionTokens(): number {
+    return positiveIntFromEnv('LISEN_SCRIPT_MAX_COMPLETION_TOKENS',
+      this.scriptReasoningEffort === 'none' ? this.llmMaxCompletionTokens : Math.max(8192, this.llmMaxCompletionTokens));
+  },
+  scriptVerificationBatchSize: 12,
+  scriptNarrationAuditBatchSize: 8,
   /** TTS model. OpenRouter model ids include the provider prefix. */
   get ttsModel(): string {
     return (

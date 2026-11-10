@@ -61,7 +61,7 @@ describe('OpenRouter LLM provider', () => {
     vi.stubEnv('LISEN_LLM_PROVIDER', 'openrouter');
     vi.stubEnv('OPENROUTER_API_KEY', 'test-key');
     vi.stubEnv('LISEN_OPENROUTER_REASONING_EFFORT', 'high');
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
       choices: [{ message: { content: '{"answer":"ready"}' } }],
     }), { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
@@ -74,6 +74,59 @@ describe('OpenRouter LLM provider', () => {
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(JSON.parse(init.body as string)).toMatchObject({ reasoning: { effort: 'high' } });
+  });
+
+  it('explicitly disables provider reasoning for non-fiction cleanup', async () => {
+    vi.stubEnv('LISEN_LLM_PROVIDER', 'openrouter');
+    vi.stubEnv('OPENROUTER_API_KEY', 'test-key');
+    vi.stubEnv('LISEN_OPENROUTER_REASONING_EFFORT', 'high');
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ message: { content: '{"answer":"ready"}' } }],
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { jsonCall } = await import('../src/providers/llm/openai.js');
+
+    await jsonCall({ model: 'deepseek/deepseek-v4-flash-0731', system: 'Return JSON.', user: 'Go.',
+      schema: z.object({ answer: z.string() }), disableReasoning: true, maxRetries: 1 });
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(JSON.parse(init.body as string).reasoning).toEqual({ enabled: false });
+  });
+
+  it('uses per-call reasoning and token limits for Script without changing the global setting', async () => {
+    vi.stubEnv('LISEN_LLM_PROVIDER', 'openrouter');
+    vi.stubEnv('OPENROUTER_API_KEY', 'test-key');
+    vi.stubEnv('LISEN_OPENROUTER_REASONING_EFFORT', 'high');
+    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
+      choices: [{ message: { content: '{"answer":"ready"}' } }],
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { jsonCall } = await import('../src/providers/llm/openai.js');
+    const base = { model: 'example/reasoning-model', system: 'Return JSON.', user: 'Go.',
+      schema: z.object({ answer: z.string() }), maxRetries: 1 };
+
+    await jsonCall({ ...base, reasoningEffort: 'medium', maxCompletionTokens: 8192 });
+    await jsonCall({ ...base, reasoningEffort: 'none' });
+
+    const first = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string);
+    const second = JSON.parse((fetchMock.mock.calls[1] as [string, RequestInit])[1].body as string);
+    expect(first).toMatchObject({ reasoning: { effort: 'medium' }, max_tokens: 8192 });
+    expect(second).not.toHaveProperty('reasoning');
+    expect(second.max_tokens).toBe(4096);
+  });
+
+  it('stops instead of retrying a response exhausted by reasoning tokens', async () => {
+    vi.stubEnv('LISEN_LLM_PROVIDER', 'openrouter');
+    vi.stubEnv('OPENROUTER_API_KEY', 'test-key');
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      choices: [{ finish_reason: 'length', message: { content: '' } }],
+    }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { jsonCall } = await import('../src/providers/llm/openai.js');
+
+    await expect(jsonCall({ model: 'example/reasoning-model', system: 'Return JSON.', user: 'Go.',
+      schema: z.object({ answer: z.string() }) })).rejects.toThrow('LISEN_SCRIPT_MAX_COMPLETION_TOKENS');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('applies the configured OpenRouter text-model price caps', async () => {
@@ -205,7 +258,7 @@ describe('OpenRouter LLM provider', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
-  it('reports safe diagnostics when OpenRouter returns an empty completion', async () => {
+  it('reports safe diagnostics when OpenRouter exhausts its completion budget', async () => {
     vi.stubEnv('LISEN_LLM_PROVIDER', 'openrouter');
     vi.stubEnv('OPENROUTER_API_KEY', 'test-key');
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
@@ -218,7 +271,7 @@ describe('OpenRouter LLM provider', () => {
     await expect(jsonCall({
       model: 'example/json-model', system: 'Return JSON.', user: 'Go.',
       schema: z.object({ answer: z.string() }), maxRetries: 1,
-    })).rejects.toThrow(/response was empty.*request-test.*gen-test.*finishReason.*length.*content.*0 chars/s);
+    })).rejects.toThrow(/completion token limit.*request-test.*gen-test.*finishReason.*length.*content.*0 chars/s);
   });
 
   it('cancels an in-flight model request without retrying it', async () => {

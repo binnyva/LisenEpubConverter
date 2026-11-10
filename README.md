@@ -30,6 +30,8 @@ Options for `convert`:
 | `--from <stage>` | Rebuild that stage and derived artifacts, then continue: extract, analyze, chapters, list-characters, script, casting, voices, synth, assemble |
 | `--force` | Rebuild from extract and continue; retain the TTS audio cache |
 | `--dry-run` | Stop before synthesis so scripts, casting, and voice bindings can be reviewed |
+| `--collection` | Treat the source as a short story collection: characters are scoped per story |
+| `--no-collection` | Treat the source as one continuous work, overriding detection |
 
 ## Pipeline
 
@@ -38,12 +40,12 @@ Source document → extract → analyze → chapters → list-characters → scr
 ```
 
 1. **extract** — source document → one markdown file per chapter (`chapters/`), plus `metadata.json` and an EPUB cover when available. HTML becomes audio-friendly Markdown; Markdown is preserved; a standalone PDF/HTML/Markdown story becomes one chapter.
-2. **analyze** — sampled LLM overview: fiction detection, provisional book summary and character candidates, author profile, and a narrate/skip decision per chapter (ToC, acknowledgments, license pages etc. are skipped).
+2. **analyze** — sampled LLM overview: fiction detection, short story collection detection, provisional book summary and character candidates, author profile, and a narrate/skip decision per chapter (ToC, acknowledgments, license pages etc. are skipped). The story grouping is saved in `stories.json`.
 3. **chapters** — per-chapter summary, minimal audio-friendly cleanup (`chapters-clean/`), and speaking-character observations with evidence (`chapter-characters/`). Discovery reads every chunk of each narratable chapter, including late appearances and unnamed speakers.
-4. **list-characters** — **List Characters** consolidates all narratable chapters into the book-specific `characters.json` registry. This offline stage merges exact names and unambiguous explicit aliases, preserves evidence and stable IDs, and flags uncertain identities or conflicting traits. Generic unnamed roles are scoped to their chapter.
-5. **script** — dialogue attribution into `{speaker, text, delivery?, confidence}` segments (`script/`), with a verification pass on ambiguous speakers. Non-fiction uses the narrator. Fiction uses the character registry even when Analyze found no characters. Newly discovered or unresolved speakers are saved in `character-candidates/` for review rather than silently becoming narrator dialogue. Layout-only dividers are removed and non-breaking spaces normalized, including when existing chapter scripts are resumed.
-6. **casting** — desired voice profile and delivery instructions per speaker (`casting.json`), independent of any TTS model.
-7. **voices** — match the cast against the shared voice library and save concrete, reviewable provider/model/voice assignments in `voice-bindings.json`, including match reasons and limitations. Every scripted speaker must have a casting entry.
+4. **list-characters** — **List Characters** consolidates all narratable chapters into the book-specific `characters.json` registry. This offline stage merges exact names and unambiguous explicit aliases, preserves evidence and stable IDs, and flags uncertain identities or conflicting traits. Generic unnamed roles are scoped to their chapter. Names are consolidated within one story, so a collection keeps each story's cast separate.
+5. **script** — dialogue attribution into `{speaker, text, delivery?, confidence}` segments (`script/`), with a verification pass on ambiguous speakers. When Script reasoning is enabled, verification also checks high-confidence character dialogue in bounded batches and marks changed assignments low-confidence for review. Boundary repairs are batched; omitted or invalid repairs retain their original text at low confidence and produce a warning for review. Non-fiction uses the narrator. Fiction uses the character registry even when Analyze found no characters. Newly discovered or unresolved speakers are saved in `character-candidates/` for review rather than silently becoming narrator dialogue. Layout-only dividers are removed and non-breaking spaces normalized, including when existing chapter scripts are resumed.
+6. **casting** — desired voice profile and delivery instructions per speaker (`casting.json`), independent of any TTS model. A collection is cast one story at a time, with a single narrator for the whole book.
+7. **voices** — match the cast against the shared voice library and save concrete, reviewable provider/model/voice assignments in `voice-bindings.json`, including match reasons and limitations. Every scripted speaker must have a casting entry. Voices are allocated per story: characters in one story avoid sharing a voice, while separate stories reuse the catalogue freely.
 8. **synth** — validate voice bindings, split speakable text into requests, and cache completed MP3s by content hash in `audio-cache/`. Existing cache files are reused. Requests include a language guard to keep the narration in the book's language.
 9. **assemble** — ffmpeg concat into per-chapter M4As, then a single `.m4b` with chapter markers, tags, and cover art.
 
@@ -57,7 +59,7 @@ npm run dev -- run story.pdf extract --rebuild
 
 Run `npm run dev -- ui` and open `http://127.0.0.1:3188`. Use `--port` and `--work` to change the port and work root. Finished M4Bs are saved in each book's work folder; pass `--out` only to export them elsewhere. The server binds to localhost and runs one stage job at a time; provider requests originate from Node using the configured API keys.
 
-The workspace shows the provisional book analysis, discovered characters and registry review issues, chapter readiness, and editable speaker instructions and voice assignments. Use the settings gear to choose an OpenAI or OpenRouter **text-processing** provider and a model for new Analyze, Chapters, List Characters, Script, and Casting jobs. The model field offers fuzzy-matched suggestions and one-click starred models. Select chapters, use **Run** to rerun a stage or **Rebuild all** to clear its derived output, and use **Cmd** to copy the corresponding CLI command. The stage activity panel retains start/completion events, retry warnings, and failures for the displayed job. Saving casting changes makes synthesis and assembly stale while preserving cached MP3s.
+The workspace shows the provisional book analysis, discovered characters and registry review issues, chapter readiness, and editable speaker instructions and voice assignments. Use the settings gear to choose an OpenAI or OpenRouter **text-processing** provider and a model for new Analyze, Chapters, List Characters, and Casting jobs. Script can use a separate model; leave it blank to use the selected text model. Enable Script reasoning with the toggle and choose an effort when using a compatible model. Reasoning also audits high-confidence dialogue, increasing LLM usage. The toggle is disabled for non-fiction books; Chapters explicitly disables OpenRouter reasoning for non-fiction cleanup, and Script makes no attribution calls for those books. The model field offers fuzzy-matched suggestions and one-click starred models. Select chapters, use **Run** to rerun a stage or **Rebuild all** to clear its derived output, and use **Cmd** to copy the corresponding CLI command. The stage activity panel retains start/completion events, retry warnings, and failures for the displayed job. Saving casting changes makes synthesis and assembly stale while preserving cached MP3s. The **Story grouping** panel marks the source as a short story collection, renames stories, merges a story told across two chapters or splits it again, and selects a story's chapters for the next stage run; characters and cast rows are grouped under their story.
 
 The model list lives in [`library/preferred-models.json`](library/preferred-models.json) and is re-read whenever the settings dialog opens, so it can be edited while the UI server is running:
 
@@ -81,13 +83,14 @@ npm run dev -- books --json
 npm run dev -- status story.md --json
 npm run dev -- run story.md list-characters  # after all narratable chapters
 npm run dev -- run story.md script --chapters 0
+npm run dev -- run anthology.epub script --story 2   # that story's chapters
 npm run dev -- run story.md synth --chapters 0
 npm run dev -- run story.md assemble --chapters 0
 npm run dev -- run story.md script --chapters 0 --rerun
 npm run dev -- run story.md script --rebuild  # clear derived output and rerun script
 ```
 
-`run` executes exactly one stage and checks prerequisites; it does not run missing earlier stages. `chapters`, `script`, `synth`, and `assemble` accept zero-based chapter indexes (the UI displays chapter numbers starting at 1). Standalone stories have chapter `0`. Selected assembly creates a separate file such as `Book Title - chapters 0.m4b` and does not mark full-book assembly complete. `books`, `status`, and `run` support `--json`; stage code may still emit progress or warnings during `run --json`.
+`run` executes exactly one stage and checks prerequisites; it does not run missing earlier stages. `chapters`, `script`, `synth`, and `assemble` accept zero-based chapter indexes (the UI displays chapter numbers starting at 1). `--story` selects by 1-based story number from `stories.json` instead, and cannot be combined with `--chapters`. Standalone stories have chapter `0`. Selected assembly creates a separate file such as `Book Title - chapters 0.m4b` and does not mark full-book assembly complete. `books`, `status`, and `run` support `--json`; stage code may still emit progress or warnings during `run --json`.
 
 Supported sources are `http://` or `https://` HTML URLs plus `.epub`, `.pdf`, `.html`, `.htm`, `.md`, and `.markdown` files. A URL is downloaded when a new work folder needs its title, and Extract downloads it again to save the source content; run `extract --rebuild` to download a fresh copy. URL imports accept HTML or text responses up to 10 MB. Use `--title`, `--author`, and `--language` on `convert` or `run … extract` to override missing source metadata. Text PDFs are supported; scanned or image-only PDFs need OCR before import, and password-protected PDFs must be unlocked first.
 
@@ -95,7 +98,7 @@ All stages report activity in the CLI and the UI’s Stage activity panel. Analy
 
 Long-running activities print elapsed-time updates every 10 seconds; the UI updates elapsed time while polling and uses an indeterminate bar when there is no measurable percentage. Percentages describe the current activity’s units, not time remaining or full-stage completion (for example, encoding can reach 100% before M4B export). UI progress tracks jobs started in that UI server; separate CLI runs are not attached to it.
 
-List Characters requires all narratable chapters and does not accept `--chapters`. For an older work folder, run `chapters` without `--rerun` to backfill missing character observations while retaining cleaned text and summaries (billable LLM discovery for fiction), then run `list-characters`. Script regenerates chapter scripts when their registry hash changes. A changed registry also clears derived audio manifests and encoded M4As so assembly cannot reuse old speaker assignments; paid MP3 caches and exported books remain. If Script reports new speakers, the workspace failure panel offers **Ask LLM to propose speaker resolutions**. It preselects only evidence-backed matches or new roles in Character Review; inspect the proposal and save the registry to resume Script at the failed chapter. The manual fallback is to review `character-candidates/`, add supported identities or aliases to the corresponding `chapter-characters/` file, and rerun `list-characters --rerun`, then Script.
+List Characters requires all narratable chapters and does not accept `--chapters`. For an older work folder, run `chapters` without `--rerun` to backfill missing character observations while retaining cleaned text and summaries (billable LLM discovery for fiction), then run `list-characters`. Script regenerates chapter scripts when their registry hash changes. A changed registry also clears derived audio manifests and encoded M4As so assembly cannot reuse old speaker assignments; paid MP3 caches and exported books remain. If Script reports new speakers, the workspace failure panel offers **Ask LLM to propose speaker resolutions**. It preselects only evidence-backed matches or new roles in Character Review; inspect the proposal and save the registry, then rerun Script directly. List Characters only needs a rerun if you edit `chapter-characters/` observations; ordinary reruns preserve reviewed registry aliases and manually added speakers.
 
 Without extra flags, completed stages and existing chapter output are reused. `--rerun` invalidates completion from that stage onward and clears the stage output needed to execute it again; downstream artifacts remain. `--rebuild` clears that stage's derived artifacts as well, but runs only the requested stage. It cannot be combined with `--chapters` or `--rerun`. Both preserve `audio-cache/`. Use a rebuild when upstream edits require regenerating downstream artifacts.
 
@@ -108,7 +111,8 @@ work/alice/
   state.json               # source hash, stage/chapter completion, synthesis input hash
   metadata.json  cover.jpg # from extract
   chapters/                # raw markdown, one file per chapter
-  analysis.json            # fiction flag, summary, characters, narrate/skip
+  analysis.json            # fiction flag, collection flag, summary, characters, narrate/skip
+  stories.json             # story grouping: one story, or one per short story
   chapters-clean/          # audio-friendly text
   chapter-summaries.json
   chapter-characters/      # per-chapter character observations and evidence
@@ -125,12 +129,46 @@ work/alice/
 
 Text artifacts are inspectable JSON/markdown, so outputs can be reviewed or corrected before the next stage runs. The final M4B is saved in its book's work folder using the book metadata title. Pass `--out` to export it to another directory. Completed cache files are keyed by provider, model, native voice ID, delivery instructions, and speakable text; changing those inputs can incur new TTS charges. Rebuilds retain the cache and previously assembled M4Bs; assembly overwrites a matching output filename.
 
+### Short story collections
+
+Each story in a collection has its own cast, so a "John" in one story is not the "John" in another. Analyze detects a collection from the chapter titles and sampled text; `--collection` and `--no-collection` override that decision and are remembered in `state.json`:
+
+```bash
+npm run dev -- convert anthology.epub --collection --dry-run
+npm run dev -- run anthology.epub list-characters --collection   # change an existing work folder
+```
+
+Analyze proposes the grouping, keeping the parts of one story together when the titles say so (a repeated title, "Part II"). A proposal that does not cover the narrated chapters exactly once is reported and replaced by one story per chapter. The grouping lives in `stories.json`:
+
+```json
+{
+  "version": 1,
+  "collection": true,
+  "stories": [
+    { "id": "story-03", "title": "The Nine Billion Names of God", "chapters": [3] },
+    { "id": "story-04", "title": "Rescue Party", "chapters": [4, 5] }
+  ]
+}
+```
+
+A story told across several chapters is grouped by listing those chapter indexes in one entry, as `story-04` does above. Use the workspace **Story grouping** panel, or edit the file directly: entries and their chapters go in chapter order, each `id` is distinct, and every narrated chapter belongs to exactly one story.
+
+Scoping affects consolidation, scripting, casting, and voice allocation:
+
+- Each story's characters are consolidated on their own, so two stories can use one name for two people with their own traits and voices. A name shared by two stories is labelled with its story title, for example `John (Rescue Party)`, because casting, bindings, and script segments are keyed by name.
+- Script offers the model only the current story's cast, which is both cheaper and less error-prone than a whole anthology's names. A speaker from another story is reported in `character-candidates/` for review instead of being accepted.
+- Each chapter's script records the hash of its own story's cast, so correcting one story's characters re-attributes that story alone and leaves the rest of the book's paid output in place.
+- Changing the collection flag or the grouping clears the character registry, scripts, casting, bindings, and encoded chapters, while keeping cleaned text, summaries, chapter observations, and the paid MP3 cache. Re-running voices after a regrouping can choose different voices, and new voices mean new TTS charges on the next synthesis.
+
 ## Configuration
 
 Environment variables (see `src/config.ts` for defaults):
 
 - `LISEN_ANALYSIS_MODEL` — model for whole-book analysis (default `gpt-4.1`)
 - `LISEN_CHAPTER_MODEL` — model for per-chapter work (default `gpt-4.1-mini`)
+- `LISEN_SCRIPT_MODEL` — model for all Script calls when set; otherwise the UI uses its selected text model, while the CLI uses `LISEN_CHAPTER_MODEL` for attribution and `LISEN_ANALYSIS_MODEL` for repair and verification
+- `LISEN_SCRIPT_REASONING_EFFORT` — Script-only effort for a reasoning-capable OpenAI or OpenRouter model (default: `LISEN_OPENROUTER_REASONING_EFFORT` for OpenRouter, otherwise `none`; allowed: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`)
+- `LISEN_SCRIPT_MAX_COMPLETION_TOKENS` — Script response token cap (default: the general cap without reasoning, or at least `8192` with reasoning)
 - `LISEN_TTS_MODEL` — default TTS target (`gpt-4o-mini-tts` for OpenAI; `openai/gpt-4o-mini-tts-2025-12-15` for OpenRouter)
 - `LISEN_LLM_PROVIDER` — text-processing provider: `openai` or `openrouter` (default `openai`)
 - `LISEN_LLM_RESPONSE_TIMEOUT_MS` — maximum wait for each text-model response before retrying (default `120000`)

@@ -6,9 +6,11 @@ import { markdownToSpeakable } from '../epub/markdown.js';
 import { hasNarratableText, normalizeNonBreakingSpaces, splitIntoBlocks } from '../util/text.js';
 import { reportWarning } from '../util/warnings.js';
 import type { WorkDir } from '../state.js';
-import { characterRegistryHash, readCharacterRegistry } from './list-characters.js';
+import { characterScopeHash, legacyCharacterRegistryHash, readCharacterRegistry } from './list-characters.js';
+import { readStories, storyFor, storyLabels, withoutStoryLabel } from './stories.js';
 import { withChapterProgress, type ChapterProgress, type ProgressReporter } from '../util/progress.js';
 import {
+  BOOK_STORY_ID,
   ScriptSegmentSchema,
   type Analysis,
   type BookMetadata,
@@ -301,13 +303,19 @@ async function repairNarrationBoundaries(
   const candidates = findNarrationAuditCandidates(deterministicallySplit);
   if (!candidates.length) return deterministicallySplit;
 
-  const entries = candidates
-    .map((id) => `Segment id ${id}, currently labelled ${JSON.stringify(deterministicallySplit[id].speaker)}:\n${JSON.stringify(deterministicallySplit[id].text)}`)
-    .join('\n\n');
-  const result = await jsonCall({
-    model: config.analysisModel,
-    schema: NarrationRepairSchema,
-    system: `You repair narration boundaries in an audiobook script. Respond with JSON: {"repairs":[{"id":number,"segments":[{"speaker","text","delivery"?,"confidence"}]}]}.
+  const repairs = new Map<number, ScriptSegment[]>();
+  const omitted = new Set<number>();
+  for (let offset = 0; offset < candidates.length; offset += config.scriptNarrationAuditBatchSize) {
+    const batch = candidates.slice(offset, offset + config.scriptNarrationAuditBatchSize);
+    const entries = batch
+      .map((id) => `Segment id ${id}, currently labelled ${JSON.stringify(deterministicallySplit[id].speaker)}:\n${JSON.stringify(deterministicallySplit[id].text)}`)
+      .join('\n\n');
+    const result = await jsonCall({
+      model: config.scriptReviewModel,
+      reasoningEffort: config.scriptReasoningEffort,
+      maxCompletionTokens: config.scriptMaxCompletionTokens,
+      schema: NarrationRepairSchema,
+      system: `You repair narration boundaries in an audiobook script. Respond with JSON: {"repairs":[{"id":number,"segments":[{"speaker","text","delivery"?,"confidence"}]}]}.
 
 For every supplied id, return a complete ordered replacement sequence for that segment.
 - Copy the supplied text verbatim, in the same order. Do not add, remove, rewrite, or summarize words.
@@ -316,31 +324,46 @@ For every supplied id, return a complete ordered replacement sequence for that s
 - Split interleaved forms such as '"Hello," said Tom. "Goodbye."' into [Tom] "Hello," + [narrator] said Tom. + [Tom] "Goodbye."
 - A supplied segment may already be valid unquoted dialogue; preserve it as one character segment when there is no narration to split.
 - Use only "narrator" or a name from the character list. Mark clear assignments "high" and uncertain ones "low".`,
-    user: `Characters:\n${castList}\n\nRepair these independently:\n${entries}`,
-  });
+      user: `Characters:\n${castList}\n\nRepair these independently:\n${entries}`,
+    });
 
-  const repairs = new Map(result.repairs.map((repair) => [repair.id, repair.segments]));
-  const unexpected = [...repairs.keys()].filter((id) => !candidates.includes(id));
-  const missing = candidates.filter((id) => !repairs.has(id));
-  if (unexpected.length || missing.length || repairs.size !== result.repairs.length) {
-    const problems = [
-      missing.length ? `no repair for segment(s) ${missing.join(', ')}` : '',
-      unexpected.length ? `unexpected segment(s) ${unexpected.join(', ')}` : '',
-      repairs.size !== result.repairs.length ? 'duplicate repair ids' : '',
-    ].filter(Boolean).join('; ');
-    throw new Error(`Narration-boundary audit returned ${problems}. Script was not saved; rerun the script stage.`);
+    const seen = new Set<number>();
+    const duplicates = new Set<number>();
+    const unexpected: number[] = [];
+    for (const repair of result.repairs) {
+      if (!batch.includes(repair.id)) {
+        unexpected.push(repair.id);
+      } else if (seen.has(repair.id)) {
+        duplicates.add(repair.id);
+        repairs.delete(repair.id);
+      } else {
+        seen.add(repair.id);
+        repairs.set(repair.id, repair.segments);
+      }
+    }
+    for (const id of duplicates) repairs.delete(id);
+    for (const id of batch) if (!repairs.has(id)) omitted.add(id);
+    if (unexpected.length || duplicates.size) {
+      reportWarning(`Narration-boundary audit returned invalid id(s) (${[
+        unexpected.length ? `unexpected: ${unexpected.join(', ')}` : '',
+        duplicates.size ? `duplicate: ${[...duplicates].join(', ')}` : '',
+      ].filter(Boolean).join('; ')}); ignored those repairs.`);
+    }
+  }
+  if (omitted.size) {
+    reportWarning(`Narration-boundary audit omitted segment(s) ${[...omitted].join(', ')}; retained their original text as low-confidence for review.`);
   }
 
   const repaired = deterministicallySplit.flatMap((segment, id) => {
     const replacement = repairs.get(id);
-    if (!replacement) return [segment];
+    if (!replacement) return omitted.has(id) ? [{ ...segment, confidence: 'low' as const }] : [segment];
     if (coverageText(replacement.map((part) => part.text).join(' ')) !== coverageText(segment.text)) {
       // An audit is advisory. The original attribution has already passed its
       // schema check, and the deterministic pass below can still separate
       // obvious quoted dialogue from narration. Do not make a repair model's
       // spelling/punctuation rewrite lose the entire chapter's progress.
       reportWarning(`Narration-boundary audit changed text in segment ${id}; ignored that repair and retained the source segment.`);
-      return [segment];
+      return [{ ...segment, confidence: 'low' as const }];
     }
     return replacement;
   });
@@ -414,7 +437,8 @@ export function withChapterTitle(segments: ScriptSegment[], title?: string): Scr
 /**
  * Stage 5: turn each cleaned chapter into an ordered script of
  * {speaker, text, delivery} segments. Fiction goes through LLM dialogue
- * attribution plus a verification pass on low-confidence segments;
+ * attribution plus a verification pass on uncertain segments (all dialogue
+ * when Script reasoning is enabled);
  * non-fiction is entirely the narrator.
  */
 export async function runScript(
@@ -425,7 +449,9 @@ export async function runScript(
   const meta = work.readJson<BookMetadata>('metadata.json');
   const analysis = work.readJson<Analysis>('analysis.json');
   const registry = readCharacterRegistry(work);
-  const registryHash = characterRegistryHash(registry);
+  const stories = readStories(work);
+  const storyNames = storyLabels(stories);
+  const legacyHash = legacyCharacterRegistryHash(registry);
   const summaries = work.readJson<ChapterSummaries>('chapter-summaries.json');
   work.dir('script');
 
@@ -433,14 +459,32 @@ export async function runScript(
     .filter((ch) => analysis.chapters.find((p) => p.index === ch.index)?.narrate)
     .filter((ch) => !chapterIndexes || chapterIndexes.includes(ch.index));
 
-  // Canonical-name lookup, including aliases, case-insensitive.
-  const canonical = new Map<string, string>();
-  for (const c of registry.characters) {
-    canonical.set(c.name.toLowerCase(), c.name);
-    for (const a of c.aliases) canonical.set(a.toLowerCase(), c.name);
-  }
-
   for (const [chapterPosition, ch] of narratable.entries()) {
+    const story = storyFor(stories, ch.index);
+    if (stories.collection && !story) {
+      throw new Error(`Chapter ${ch.index + 1} belongs to no story in stories.json. Rerun analyze, or add the chapter to a story, then rerun Script.`);
+    }
+    const storyId = story?.id ?? BOOK_STORY_ID;
+    const storyLabel = storyNames.get(storyId);
+    // Only this story's characters can speak in this chapter. A name from
+    // another story is reported for review instead of silently accepted.
+    const storyCharacters = registry.characters.filter((character) => (character.story || BOOK_STORY_ID) === storyId);
+    const scopeHash = characterScopeHash(registry, storyId);
+    // Canonical-name lookup, including aliases and the name as the book's own
+    // text writes it, case-insensitive.
+    const chapterCanonical = new Map<string, string>();
+    for (const c of storyCharacters) {
+      chapterCanonical.set(c.name.toLowerCase(), c.name);
+      for (const label of [withoutStoryLabel(c.name, storyLabel), ...c.aliases]) {
+        if (!chapterCanonical.has(label.toLowerCase())) chapterCanonical.set(label.toLowerCase(), c.name);
+      }
+    }
+    const scopedSuffix = ` (chapter ${ch.index + 1})`;
+    for (const character of storyCharacters) {
+      if (!character.chapters.includes(ch.index) || !character.name.endsWith(scopedSuffix)) continue;
+      const role = character.name.slice(0, -scopedSuffix.length).toLowerCase();
+      if (!chapterCanonical.has(role)) chapterCanonical.set(role, character.name);
+    }
     await withChapterProgress({
       chapterIndex: ch.index, chapterTitle: ch.title,
       completedChapters: chapterPosition, totalChapters: narratable.length,
@@ -451,15 +495,18 @@ export async function runScript(
         // Keep per-chapter resume behavior, while repairing old output produced
         // before the layout-only segment guard was added.
         const existing = work.readJson<ChapterScript>(scriptFile);
-        if (existing.characterRegistryHash === registryHash) {
+        // Scripts written before story scopes carry a whole-registry hash.
+        // Accept an unchanged one and upgrade it rather than re-attributing.
+        const legacy = existing.characterScopeHash === undefined;
+        if (legacy ? existing.characterRegistryHash === legacyHash : existing.characterScopeHash === scopeHash) {
           const text = fs.readFileSync(
             work.path(`chapters-clean/${String(ch.index).padStart(2, '0')}.md`),
             'utf8'
           );
           const { title } = splitLeadingChapterTitle(text);
           const segments = withChapterTitle(existing.segments, title);
-          if (segments.length !== existing.segments.length || segments.some((segment, i) => segment !== existing.segments[i])) {
-            work.writeJson(scriptFile, { ...existing, segments });
+          if (legacy || segments.length !== existing.segments.length || segments.some((segment, i) => segment !== existing.segments[i])) {
+            work.writeJson(scriptFile, { index: existing.index, story: storyId, characterScopeHash: scopeHash, segments });
           }
           update({ phase: 'skipped', completedChapters: chapterPosition + 1 });
           return;
@@ -481,17 +528,24 @@ export async function runScript(
           .map((p) => ({ speaker: 'narrator', text: p, confidence: 'high' as const }));
         update({ phase: 'saving', totalChars: text.length, processedChars: text.length });
       } else {
-        segments = await attributeChapter(text, ch.index, ch.title, analysis, summaries, canonical, registry.characters, update);
+        // Prompts use the names the book's text writes, not the story-labelled
+        // canonical keys; attribution maps them back through chapterCanonical.
+        const castCharacters = storyCharacters.map((character) => ({
+          ...character,
+          name: withoutStoryLabel(character.name, storyLabel),
+        }));
+        segments = await attributeChapter(text, ch.index, ch.title, analysis, summaries, chapterCanonical, castCharacters, update,
+          stories.collection ? (story?.title || ch.title) : undefined);
       }
 
-      const candidates = segments.filter((segment) => segment.speaker !== 'narrator' && !canonical.has(segment.speaker.toLowerCase()));
+      const candidates = segments.filter((segment) => segment.speaker !== 'narrator' && !chapterCanonical.has(segment.speaker.toLowerCase()));
       const candidatesFile = `character-candidates/${String(ch.index).padStart(2, '0')}.json`;
       if (candidates.length) {
-        work.writeJson(candidatesFile, { index: ch.index, candidates });
-        throw new Error(`New or unresolved speakers in chapter ${ch.index + 1}: ${[...new Set(candidates.map((s) => s.speaker))].join(', ')}. Review ${candidatesFile}, update chapter-characters/${String(ch.index).padStart(2, '0')}.json with supported identities, then run list-characters --rerun and script.`);
+        work.writeJson(candidatesFile, { index: ch.index, story: storyId, candidates });
+        throw new Error(`New or unresolved speakers in chapter ${ch.index + 1}${stories.collection ? ` (story "${story?.title || ch.title}")` : ''}: ${[...new Set(candidates.map((s) => s.speaker))].join(', ')}. Review ${candidatesFile} and resolve these in Character Review, then rerun Script. If editing chapter-characters/${String(ch.index).padStart(2, '0')}.json directly, rerun List Characters first.`);
       }
       fs.rmSync(work.path(candidatesFile), { force: true });
-      const script: ChapterScript = { index: ch.index, characterRegistryHash: registryHash, segments: withChapterTitle(segments, title) };
+      const script: ChapterScript = { index: ch.index, story: storyId, characterScopeHash: scopeHash, segments: withChapterTitle(segments, title) };
       work.writeJson(scriptFile, script);
       update({ phase: 'completed', completedChapters: chapterPosition + 1 });
     });
@@ -507,6 +561,7 @@ async function attributeChapter(
   canonical: Map<string, string>,
   characters: PersonProfile[],
   update: (change: Partial<ChapterProgress>) => void,
+  storyTitle?: string,
 ): Promise<ScriptSegment[]> {
   const castList = characters
     .map((c) => `- ${c.name}${c.aliases.length ? ` (aka ${c.aliases.join(', ')})` : ''}: ${c.sex}, ${c.age}, ${c.importance}`)
@@ -521,7 +576,9 @@ async function attributeChapter(
     update({ phase: 'attributing', block: i + 1, totalBlocks: blocks.length, processedChars, totalChars });
     const tail = segments.slice(-3).map((s) => `[${s.speaker}] ${s.text.slice(0, 120)}`).join('\n');
     const result = await jsonCall({
-      model: config.chapterModel,
+      model: config.scriptModel,
+      reasoningEffort: config.scriptReasoningEffort,
+      maxCompletionTokens: config.scriptMaxCompletionTokens,
       schema: SegmentsSchema,
       system: `You convert book text into a multi-voice audiobook script. Respond with JSON: {"segments": [{"speaker", "text", "delivery"?, "confidence"}]}.
 
@@ -653,7 +710,9 @@ Output JSON for Example 2...
 },
 ---
 `,
-      user: `Book: "${analysis.summary.slice(0, 400)}"
+      user: `${storyTitle
+        ? `Short story: "${storyTitle}" — one story in a collection. Its characters are its own; the character list below is complete for this story.`
+        : `Book: "${analysis.summary.slice(0, 400)}"`}
 Chapter ${index}: "${title}"${blocks.length > 1 ? ` (part ${i + 1} of ${blocks.length})` : ''}
 Chapter summary: ${summaries[index] ?? ''}
 
@@ -672,8 +731,9 @@ ${block}`,
     processedChars += block.length;
   }
 
-  // Normalize speaker names; collect ambiguous segments for verification.
-  const ambiguous: number[] = [];
+  // Reasoning runs also review confident dialogue; those labels can be wrong.
+  const reviewAllDialogue = config.scriptReasoningEffort !== 'none';
+  const toVerify: number[] = [];
   segments.forEach((seg, i) => {
     if (seg.speaker.toLowerCase() === 'narrator') {
       seg.speaker = 'narrator';
@@ -681,36 +741,57 @@ ${block}`,
     }
     const canon = canonical.get(seg.speaker.toLowerCase());
     if (canon) seg.speaker = canon;
-    if (!canon || seg.confidence === 'low') ambiguous.push(i);
+    if (!canon || seg.confidence === 'low' || reviewAllDialogue) toVerify.push(i);
   });
 
-  // Verification pass: re-attribute ambiguous segments with surrounding context.
-  if (ambiguous.length > 0) {
-    update({ phase: 'verifying', processedChars, ambiguousSegments: ambiguous.length });
-    const items = ambiguous
+  // Bound each request so reasoning and JSON answers fit the completion budget.
+  if (toVerify.length > 0) {
+    let changedAssignments = 0;
+    update({ phase: 'verifying', processedChars, ambiguousSegments: toVerify.length });
+    for (let offset = 0; offset < toVerify.length; offset += config.scriptVerificationBatchSize) {
+      const batch = toVerify.slice(offset, offset + config.scriptVerificationBatchSize);
+      const items = batch
       .map((i) => {
         const ctx = segments
-          .slice(Math.max(0, i - 2), i + 3)
-          .map((s, j) => `${Math.max(0, i - 2) + j === i ? '>>' : '  '} [${s.speaker}] ${s.text.slice(0, 200)}`)
+          .slice(Math.max(0, i - 3), i + 4)
+          .map((s, j) => `${Math.max(0, i - 3) + j === i ? '>>' : '  '} [${s.speaker}] ${s.text.slice(0, 240)}`)
           .join('\n');
         return `Segment id ${i} (marked ">>"):\n${ctx}`;
       })
       .join('\n\n');
 
-    const verified = await jsonCall({
-      model: config.analysisModel,
-      schema: VerifySchema,
-      system: `You verify speaker attribution in an audiobook script. For each segment id, decide who speaks the ">>" line. Respond with JSON: {"attributions": [{"id": number, "speaker": "name"}]}. Prefer canonical names from the character list. If a speaking character is missing, return their supported name or a specific role label for review. Use "unresolved speaker" if dialogue cannot be attributed. Use "narrator" only for narration; missing characters are not narration.`,
-      user: `Characters:\n${castList}\n\n${items}`,
-    });
+      const verified = await jsonCall({
+        model: config.scriptReviewModel,
+        reasoningEffort: config.scriptReasoningEffort,
+        maxCompletionTokens: config.scriptMaxCompletionTokens,
+        schema: VerifySchema,
+        system: `You independently verify speaker attribution in an audiobook script. For every supplied segment id, decide who speaks the ">>" line. Respond with JSON: {"attributions": [{"id": number, "speaker": "name"}]}. Current labels are tentative, including high-confidence labels; check dialogue tags, turn-taking, pronouns, and scene context. Keep the current label if evidence does not support a change. Prefer canonical names from the character list. If a speaking character is missing, return their supported name or a specific role label for review. Use "unresolved speaker" if dialogue cannot be attributed. Use "narrator" only for narration; missing characters are not narration.`,
+        user: `Characters:\n${castList}\n\n${items}`,
+      });
 
-    const byId = new Map(verified.attributions.map((a) => [a.id, a.speaker]));
-    for (const i of ambiguous) {
-      const speaker = byId.get(i);
-      const canon = speaker && canonical.get(speaker.toLowerCase());
-      segments[i].speaker =
-        speaker?.toLowerCase() === 'narrator' ? 'narrator' : (canon ?? speaker ?? 'unresolved speaker');
-      segments[i].confidence = canon || speaker?.toLowerCase() === 'narrator' ? 'high' : 'low';
+      const byId = new Map(verified.attributions.map((a) => [a.id, a.speaker]));
+      if (byId.size !== verified.attributions.length || byId.size !== batch.length
+        || batch.some((id) => !byId.has(id)) || [...byId.keys()].some((id) => !batch.includes(id))) {
+        throw new Error('Speaker verification returned missing, duplicate, or unexpected segment ids. Script was not saved; rerun the script stage.');
+      }
+      for (const i of batch) {
+        const speaker = byId.get(i)!;
+        const canon = canonical.get(speaker.toLowerCase());
+        const corrected = speaker.toLowerCase() === 'narrator' ? 'narrator' : (canon ?? speaker);
+        if (!reviewAllDialogue) {
+          segments[i].speaker = corrected;
+          segments[i].confidence = canon || corrected === 'narrator' ? 'high' : 'low';
+          continue;
+        }
+        if (corrected.toLowerCase() === segments[i].speaker.toLowerCase()) continue;
+        segments[i].speaker = corrected;
+        // A changed assignment needs review even if the replacement is known.
+        segments[i].confidence = 'low';
+        changedAssignments += 1;
+      }
+    }
+    if (changedAssignments) {
+      reportWarning(`Script verification changed ${changedAssignments} speaker assignment(s) in chapter ${index + 1}; review low-confidence segments before synthesis.`);
     }
   }
 

@@ -38,8 +38,13 @@ export function loadPreferredAudioModels(file = preferredAudioModelsFile): Prefe
   return loadModels(file, ' audio');
 }
 
-export function defaultLlmSettings(): { provider: ProviderId; model: string } {
-  return { provider: config.llmProvider, model: config.analysisModel };
+export function defaultLlmSettings(): { provider: ProviderId; model: string; scriptModel: string; scriptReasoningEffort: string } {
+  return {
+    provider: config.llmProvider,
+    model: config.analysisModel,
+    scriptModel: process.env.LISEN_SCRIPT_MODEL ?? '',
+    scriptReasoningEffort: config.scriptReasoningEffort,
+  };
 }
 
 export function defaultAudioSettings(): { provider: ProviderId; model: string } {
