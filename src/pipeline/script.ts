@@ -3,12 +3,13 @@ import { z } from 'zod';
 import { jsonCall } from '../providers/llm/openai.js';
 import { config } from '../config.js';
 import { markdownToSpeakable } from '../epub/markdown.js';
-import { hasNarratableText, normalizeNonBreakingSpaces, splitIntoBlocks } from '../util/text.js';
+import { condenseSummary, hasNarratableText, normalizeNonBreakingSpaces, splitIntoBlocks } from '../util/text.js';
 import { reportWarning } from '../util/warnings.js';
 import type { WorkDir } from '../state.js';
 import { characterScopeHash, legacyCharacterRegistryHash, readCharacterRegistry } from './list-characters.js';
 import { readStories, storyFor, storyLabels, withoutStoryLabel } from './stories.js';
 import { withChapterProgress, type ChapterProgress, type ProgressReporter } from '../util/progress.js';
+import { checkpointKey, clearCheckpoints, loadCheckpoint, saveCheckpoint } from './checkpoint.js';
 import {
   BOOK_STORY_ID,
   ScriptSegmentSchema,
@@ -534,7 +535,7 @@ export async function runScript(
           ...character,
           name: withoutStoryLabel(character.name, storyLabel),
         }));
-        segments = await attributeChapter(text, ch.index, ch.title, analysis, summaries, chapterCanonical, castCharacters, update,
+        segments = await attributeChapter(work, text, ch.index, ch.title, analysis, summaries, chapterCanonical, castCharacters, update,
           stories.collection ? (story?.title || ch.title) : undefined);
       }
 
@@ -547,12 +548,14 @@ export async function runScript(
       fs.rmSync(work.path(candidatesFile), { force: true });
       const script: ChapterScript = { index: ch.index, story: storyId, characterScopeHash: scopeHash, segments: withChapterTitle(segments, title) };
       work.writeJson(scriptFile, script);
+      clearCheckpoints(work, 'script', [ch.index]);
       update({ phase: 'completed', completedChapters: chapterPosition + 1 });
     });
   }
 }
 
 async function attributeChapter(
+  work: WorkDir,
   text: string,
   index: number,
   title: string,
@@ -571,8 +574,25 @@ async function attributeChapter(
   const segments: ScriptSegment[] = [];
   const totalChars = blocks.reduce((sum, block) => sum + block.length, 0);
   let processedChars = 0;
+  // Sent with every block, so a long chapter's block-by-block summary is capped.
+  const chapterSummary = condenseSummary(summaries[index] ?? '', config.promptSummaryChars);
+
+  // Blocks attributed by an interrupted run are reused while the text is
+  // unchanged. The cast is deliberately not part of the key: a chapter that
+  // stopped on an unresolved speaker resumes after the registry is corrected,
+  // and the saved names are matched against the new cast below. A name the new
+  // cast no longer has goes to verification and then to review, never to
+  // audio. Verification always runs again, so a failure there costs only the
+  // verification calls on the next attempt.
+  const checkpoint = checkpointKey(config.llmChunkChars, text);
+  const finished = loadCheckpoint<ScriptSegment[]>(work, 'script', index, checkpoint, blocks.length);
+  for (const [i, saved] of finished.entries()) {
+    segments.push(...saved);
+    processedChars += blocks[i].length;
+  }
 
   for (const [i, block] of blocks.entries()) {
+    if (i < finished.length) continue;
     update({ phase: 'attributing', block: i + 1, totalBlocks: blocks.length, processedChars, totalChars });
     const tail = segments.slice(-3).map((s) => `[${s.speaker}] ${s.text.slice(0, 120)}`).join('\n');
     const result = await jsonCall({
@@ -714,7 +734,7 @@ Output JSON for Example 2...
         ? `Short story: "${storyTitle}" — one story in a collection. Its characters are its own; the character list below is complete for this story.`
         : `Book: "${analysis.summary.slice(0, 400)}"`}
 Chapter ${index}: "${title}"${blocks.length > 1 ? ` (part ${i + 1} of ${blocks.length})` : ''}
-Chapter summary: ${summaries[index] ?? ''}
+Chapter summary: ${chapterSummary}
 
 Characters:
 ${castList}
@@ -727,7 +747,11 @@ ${block}`,
     if (auditCandidates.length) {
       update({ phase: 'repairing', processedChars, auditedSegments: auditCandidates.length });
     }
-    segments.push(...await repairNarrationBoundaries(result.segments, castList, characters));
+    const attributed = await repairNarrationBoundaries(result.segments, castList, characters);
+    segments.push(...attributed);
+    // Saved before the speaker normalisation below mutates these segments.
+    finished.push(attributed);
+    saveCheckpoint(work, 'script', index, checkpoint, finished);
     processedChars += block.length;
   }
 

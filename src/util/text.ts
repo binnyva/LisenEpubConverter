@@ -62,6 +62,29 @@ export function splitSentences(text: string, maxChars: number): string[] {
   return pieces;
 }
 
+/**
+ * Shorten a long summary for use as prompt context. A chapter summary is the
+ * concatenation of one summary per block, so a long chapter's summary can be
+ * larger than the text it is sent alongside. Keep whole sentences from the
+ * start and the end: the opening sets the scene, the ending is what the next
+ * text follows on from.
+ */
+export function condenseSummary(summary: string, maxChars: number): string {
+  const text = summary.replace(/\s+/g, ' ').trim();
+  if (text.length <= maxChars) return text;
+  const sentences = text.match(/[^.!?…]+[.!?…]+["'”’]?\s*|[^.!?…]+$/g) ?? [text];
+  const half = Math.floor(maxChars / 2);
+  let head = '';
+  let used = 0;
+  while (used < sentences.length && (head + sentences[used]).length <= half) head += sentences[used++];
+  let tail = '';
+  let last = sentences.length - 1;
+  while (last >= used && (sentences[last] + tail).length <= half) tail = sentences[last--] + tail;
+  // One sentence longer than the budget: fall back to a plain cut.
+  if (!head && !tail) return `${text.slice(0, maxChars).trimEnd()} …`;
+  return [head.trim(), tail.trim()].filter(Boolean).join(' … ');
+}
+
 export function countWords(text: string): number {
   return text.split(/\s+/).filter(Boolean).length;
 }

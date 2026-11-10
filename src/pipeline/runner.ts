@@ -17,6 +17,7 @@ import type { VoiceTarget } from '../voices/library.js';
 import { withWarningReporter } from '../util/warnings.js';
 import { withStageProgress, type ChapterProgress, type ActivityProgress } from '../util/progress.js';
 import { throwIfTaskCancelled, withTaskCancellation } from '../util/cancellation.js';
+import { clearCheckpoints } from './checkpoint.js';
 import { sourceIsAvailable, type SourceMetadataOverrides } from '../source/read.js';
 
 export type ChapterStage = 'chapters' | 'script' | 'synth';
@@ -381,10 +382,16 @@ export function clearArtifactsFrom(work: WorkDir, stage: Stage): void {
     synth: ['audio'],
   };
   for (const rel of files[stage] ?? []) fs.rmSync(work.path(rel), { recursive: true, force: true });
+  // Partial chapter progress belongs to the output being rebuilt.
+  const order = STAGES.indexOf(stage);
+  if (order <= STAGES.indexOf('chapters')) clearCheckpoints(work, 'chapters');
+  if (order <= STAGES.indexOf('script')) clearCheckpoints(work, 'script');
 }
 
 /** Clear only the output that prevents a requested stage from actually executing. */
 function clearStageOutputForRerun(work: WorkDir, stage: Stage, indexes?: number[]): void {
+  // An explicit rerun asks for fresh model output, not a resumed attempt.
+  if (stage === 'chapters' || stage === 'script') clearCheckpoints(work, stage, indexes);
   if (stage === 'chapters') {
     if (!indexes) {
       fs.rmSync(work.path('chapters-clean'), { recursive: true, force: true });

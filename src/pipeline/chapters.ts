@@ -2,19 +2,27 @@ import fs from 'node:fs';
 import { z } from 'zod';
 import { jsonCall } from '../providers/llm/openai.js';
 import { config } from '../config.js';
-import { normalizeNonBreakingSpaces, splitIntoBlocks } from '../util/text.js';
+import { condenseSummary, normalizeNonBreakingSpaces, splitIntoBlocks } from '../util/text.js';
 import type { WorkDir } from '../state.js';
 import type { Analysis, BookMetadata, ChapterSummaries } from '../types.js';
 import { CharacterObservationSchema, ChapterCharactersSchema, type ChapterCharacters } from '../types.js';
 import { buildCharacterRegistry, characterChapterFile } from './list-characters.js';
 import { readStories, storyFor } from './stories.js';
 import { reportProgress, type ChapterProgress } from '../util/progress.js';
+import { checkpointKey, clearCheckpoints, loadCheckpoint, saveCheckpoint } from './checkpoint.js';
 
 const DiscoverySchema = z.object({ characters: z.array(CharacterObservationSchema) });
 const ChunkResultSchema = DiscoverySchema.extend({
   cleanedText: z.string(),
   partialSummary: z.string(),
 });
+
+/** One finished block of a chapter, saved so an interrupted chapter resumes instead of restarting. */
+interface ChapterBlockCheckpoint {
+  cleanedText?: string;
+  partialSummary?: string;
+  observations: ChapterCharacters['observations'];
+}
 
 const SUMMARIES_FILE = 'chapter-summaries.json';
 const CHARACTER_RULES = `characters: list speaking characters actually present in THIS text, including unnamed speakers identified by a specific role.
@@ -167,7 +175,9 @@ export async function runChapters(work: WorkDir, chapterIndexes?: number[]): Pro
     const recentSummaries = Object.entries(summaries)
       .filter(([index]) => inScope(Number(index)))
       .slice(-5)
-      .map(([i, s]) => `Chapter ${i}: ${s}`)
+      // A long chapter's summary is one summary per block; sent whole it
+      // outweighs the text being processed.
+      .map(([i, s]) => `Chapter ${i}: ${condenseSummary(s, config.promptSummaryChars)}`)
       .join('\n');
 
     const cleanedParts: string[] = [];
@@ -178,7 +188,24 @@ export async function runChapters(work: WorkDir, chapterIndexes?: number[]): Pro
       .filter((earlier) => inScope(earlier.index))
       .filter((earlier) => fs.existsSync(work.path(characterChapterFile(earlier.index))))
       .map((earlier) => ChapterCharactersSchema.parse(work.readJson(characterChapterFile(earlier.index))));
+    // Blocks finished by an interrupted run of this same text are reused.
+    const checkpoint = checkpointKey(hasCleanOutput ? 'discover' : 'clean', config.llmChunkChars, text);
+    const finished = loadCheckpoint<ChapterBlockCheckpoint>(work, 'chapters', ch.index, checkpoint, blocks.length);
+    for (const [i, saved] of finished.entries()) {
+      if (!hasCleanOutput) {
+        cleanedParts.push(saved.cleanedText ?? '');
+        partialSummaries.push(saved.partialSummary ?? '');
+      }
+      discoveries.observations.push(...saved.observations);
+      processedChars += blocks[i].length;
+    }
+    if (finished.length) progress(`Resuming after ${finished.length} of ${blocks.length} block(s) saved by an interrupted run`);
+    const saveBlock = (saved: ChapterBlockCheckpoint): void => {
+      finished.push(saved);
+      saveCheckpoint(work, 'chapters', ch.index, checkpoint, finished);
+    };
     for (const [i, block] of blocks.entries()) {
+      if (i < finished.length) continue;
       progress(`${hasCleanOutput ? 'Discovering speakers in' : 'Cleaning and summarizing'} block ${i + 1}/${blocks.length} — waiting for model response`);
       const knownCharacters = buildCharacterRegistry([...earlierDiscoveries, discoveries]).characters
         .map(({ name, aliases, chapters }) => ({ name, aliases, chapters }));
@@ -200,7 +227,9 @@ Text:\n${block}`;
           system: `Identify audiobook speakers. Respond with JSON: {"characters": [...]}\n${CHARACTER_RULES}`,
           user: context,
         });
-        discoveries.observations.push(...result.characters.map((character) => ({ ...character, chunk: i })));
+        const observations = result.characters.map((character) => ({ ...character, chunk: i }));
+        discoveries.observations.push(...observations);
+        saveBlock({ observations });
         processedChars += block.length;
         continue;
       }
@@ -222,9 +251,12 @@ partialSummary: 2-4 sentences summarizing what happens in THIS text.
 ${CHARACTER_RULES}`,
         user: context,
       });
-      cleanedParts.push(normalizeNonBreakingSpaces(result.cleanedText));
+      const cleanedText = normalizeNonBreakingSpaces(result.cleanedText);
+      const observations = analysis.isFiction ? result.characters.map((character) => ({ ...character, chunk: i })) : [];
+      cleanedParts.push(cleanedText);
       partialSummaries.push(result.partialSummary);
-      if (analysis.isFiction) discoveries.observations.push(...result.characters.map((character) => ({ ...character, chunk: i })));
+      discoveries.observations.push(...observations);
+      saveBlock({ cleanedText, partialSummary: result.partialSummary, observations });
       processedChars += block.length;
     }
 
@@ -238,6 +270,7 @@ ${CHARACTER_RULES}`,
       ...discoveries,
       observations: mergeChapterObservations(discoveries.observations),
     });
+    clearCheckpoints(work, 'chapters', [ch.index]);
     completedChapters++;
     progress('Chapter complete', 'completed');
   }

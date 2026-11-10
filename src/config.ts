@@ -170,6 +170,8 @@ export const config = {
   },
   /** Max characters sent to the LLM per chunk when processing chapter text. */
   llmChunkChars: 6000,
+  /** Max characters of any one chapter summary sent as prompt context. */
+  promptSummaryChars: 800,
 
   /** Maximum tokens requested for a structured LLM completion. */
   get llmMaxCompletionTokens(): number {
