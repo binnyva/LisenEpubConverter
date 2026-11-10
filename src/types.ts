@@ -14,6 +14,11 @@ export interface ExtractedChapter {
   words: number;
   /** Structurally detected as a TOC/nav document. */
   isNav: boolean;
+  /**
+   * Set when Extract split one oversized source chapter into several. `first`
+   * is the index of the chapter holding part 1, shared by every part.
+   */
+  part?: { first: number; number: number; total: number };
 }
 
 export interface BookMetadata {

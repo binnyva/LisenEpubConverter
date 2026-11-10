@@ -4,6 +4,8 @@ import type { WorkDir } from '../state.js';
 import type { BookMetadata, ExtractedChapter } from '../types.js';
 import { reportProgress } from '../util/progress.js';
 import { readSource, type SourceMetadataOverrides } from '../source/read.js';
+import { splitOversizedChapter } from '../source/split.js';
+import { config } from '../config.js';
 
 /** Stage 1: source document -> one markdown file per chapter + metadata.json + cover. */
 export async function runExtract(sourcePath: string, work: WorkDir, overrides?: SourceMetadataOverrides): Promise<BookMetadata> {
@@ -14,9 +16,25 @@ export async function runExtract(sourcePath: string, work: WorkDir, overrides?: 
   work.dir('chapters');
 
   const chapters: ExtractedChapter[] = [];
-  reportProgress({ activity: 'Extracting chapter text', completedUnits: 0, totalUnits: source.chapters.length, unit: 'chapters extracted' });
-  source.chapters.forEach((item, index) => {
-    const title = item.title || `Section ${index + 1}`;
+  // A source can deliver a whole part of a novel, or a whole book, as one
+  // document. Split those so later stages work, retry and report in chapters
+  // of a manageable size. Navigation documents are never narrated.
+  const items = source.chapters.flatMap((item, sourceIndex) => {
+    const baseTitle = item.title || `Section ${sourceIndex + 1}`;
+    const parts = item.isNav
+      ? [item.markdown]
+      : splitOversizedChapter(item.markdown, config.maxChapterWords, config.targetChapterWords);
+    return parts.map((markdown, position) => ({
+      ...item,
+      markdown,
+      id: position ? `${item.id}#part${position + 1}` : item.id,
+      title: position ? `${baseTitle} (part ${position + 1})` : baseTitle,
+      part: parts.length > 1 ? { offset: position, number: position + 1, total: parts.length } : undefined,
+    }));
+  });
+  reportProgress({ activity: 'Extracting chapter text', completedUnits: 0, totalUnits: items.length, unit: 'chapters extracted' });
+  items.forEach((item, index) => {
+    const title = item.title;
 
     const slug =
       title
@@ -34,8 +52,9 @@ export async function runExtract(sourcePath: string, work: WorkDir, overrides?: 
       file,
       words: countWords(item.markdown),
       isNav: item.isNav,
+      ...(item.part ? { part: { first: index - item.part.offset, number: item.part.number, total: item.part.total } } : {}),
     });
-    reportProgress({ activity: `Extracted ${title}`, completedUnits: index + 1, totalUnits: source.chapters.length, unit: 'chapters extracted' });
+    reportProgress({ activity: `Extracted ${title}`, completedUnits: index + 1, totalUnits: items.length, unit: 'chapters extracted' });
   });
 
   let coverFile: string | undefined;

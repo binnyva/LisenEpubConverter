@@ -27,7 +27,26 @@ export function buildStories(collection: boolean, metadata: BookMetadata, analys
   if (!collection) {
     return { version: 1, collection: false, stories: [{ id: BOOK_STORY_ID, title: metadata.title ?? '', chapters }] };
   }
-  return proposedStories(metadata, analysis) ?? oneStoryPerChapter(metadata, chapters);
+  return keepSplitChaptersTogether(proposedStories(metadata, analysis) ?? oneStoryPerChapter(metadata, chapters), metadata);
+}
+
+/**
+ * Extract can split one long story into several chapters. Those parts are one
+ * story whatever the proposal or the per-chapter default says, so merge
+ * neighbouring stories that hold parts of the same source chapter.
+ */
+function keepSplitChaptersTogether(stories: Stories, metadata: BookMetadata): Stories {
+  const sourceOf = (index: number): number => metadata.chapters.find((chapter) => chapter.index === index)?.part?.first ?? index;
+  const merged: Story[] = [];
+  for (const story of stories.stories) {
+    const previous = merged.at(-1);
+    if (previous && sourceOf(previous.chapters.at(-1)!) === sourceOf(story.chapters[0])) {
+      previous.chapters = [...previous.chapters, ...story.chapters];
+    } else {
+      merged.push({ ...story, chapters: [...story.chapters] });
+    }
+  }
+  return { ...stories, stories: merged };
 }
 
 /** The default grouping: a collection's stories are one chapter each. */

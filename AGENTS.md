@@ -124,6 +124,7 @@ work/                  # gitignored per-book artifacts; work/alice/ is a sample 
 
 ## Gotchas
 
+- Extract splits a source chapter over `config.maxChapterWords` into parts of about `config.targetChapterWords` (`src/source/split.ts`), cutting only between paragraphs and preferring headings, section markers, then scene breaks. Parts are ordinary chapters titled `Title (part N)` and carry `part: { first, number, total }` in `metadata.json`; `buildStories()` keeps the parts of one source chapter in one story. Only part 1 holds the source heading, so the title is announced once. Chapter indexes therefore differ from spine positions, and an existing work folder keeps its old chapters until Extract is rebuilt.
 - `package.json` still declares Node 20+, but the current Commander dependency requires Node 22.12+. Use a runtime that meets the dependency requirements.
 - `dist/` is gitignored build output; the `lisen` bin points at `dist/cli.js`, so `npm run build` before testing the installed binary.
 - The work-dir slug comes from the EPUB *filename*, not its metadata — renaming the file orphans its work directory.

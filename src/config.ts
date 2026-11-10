@@ -170,6 +170,10 @@ export const config = {
   },
   /** Max characters sent to the LLM per chunk when processing chapter text. */
   llmChunkChars: 6000,
+  /** Extract splits a source chapter longer than this many words into parts. */
+  maxChapterWords: 8000,
+  /** Approximate size of each part when a chapter is split. */
+  targetChapterWords: 5000,
   /** Max characters of any one chapter summary sent as prompt context. */
   promptSummaryChars: 800,
 
