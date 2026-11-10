@@ -9,11 +9,13 @@ import { CharacterObservationSchema, ChapterCharactersSchema, type ChapterCharac
 import { buildCharacterRegistry, characterChapterFile } from './list-characters.js';
 import { readStories, storyFor } from './stories.js';
 import { reportProgress, type ChapterProgress } from '../util/progress.js';
+import { applyCleanupEdits, dropLayoutOnlyParagraphs } from './cleanup.js';
+import { reportWarning } from '../util/warnings.js';
 import { checkpointKey, clearCheckpoints, loadCheckpoint, saveCheckpoint } from './checkpoint.js';
 
 const DiscoverySchema = z.object({ characters: z.array(CharacterObservationSchema) });
 const ChunkResultSchema = DiscoverySchema.extend({
-  cleanedText: z.string(),
+  edits: z.array(z.object({ find: z.string(), replace: z.string() })),
   partialSummary: z.string(),
 });
 
@@ -237,21 +239,26 @@ Text:\n${block}`;
         model: config.chapterModel,
         disableReasoning: !analysis.isFiction,
         schema: ChunkResultSchema,
-        system: `You prepare book chapters for audiobook narration. Respond with JSON: {"cleanedText": "...", "partialSummary": "...", "characters": [...]}.
+        system: `You prepare book chapters for audiobook narration. Respond with JSON: {"edits": [{"find": "...", "replace": "..."}], "partialSummary": "...", "characters": [...]}.
 
-cleanedText rules — change AS LITTLE AS POSSIBLE:
-- Keep the text verbatim except for things that read badly aloud.
-- Expand abbreviations that a narrator would say in full (e.g. "Mr." stays, but "i.e." becomes "that is").
-- Spell out unusual symbols, footnote markers, or citation numbers, or drop them if they add nothing.
-- Drop decorative layout-only section dividers (for example, lines made only of repeated asterisks, dashes, or underscores). They are not narration.
-- Keep markdown headings as-is (they are handled later).
-- Never summarize, shorten, or reorder the actual content.
+edits: the text is kept exactly as written. List only the small corrections it needs to read well aloud. Most text needs none; return "edits": [] then.
+- find: a short exact quotation from the text, copied character for character, with enough neighbouring words to identify the place. replace: what should be read instead. Every occurrence of find in this text is replaced.
+- Expand abbreviations and units that a narrator would say in full ("i.e." becomes "that is", "5 km" becomes "5 kilometres"; "Mr." stays).
+- Spell out unusual symbols. Remove footnote markers and citation numbers, quoting the word they are attached to ("women.12" becomes "women.").
+- Correct an obvious scanning or typesetting error only when the intended word is certain.
+- Do not change wording, spelling, contractions, punctuation, quotation marks, or style. Do not remove or rewrite sentences. Do not touch markdown headings.
 
 partialSummary: 2-4 sentences summarizing what happens in THIS text.
 ${CHARACTER_RULES}`,
         user: context,
       });
-      const cleanedText = normalizeNonBreakingSpaces(result.cleanedText);
+      // The model lists corrections; the prose itself is the source text.
+      const cleanup = applyCleanupEdits(block, result.edits ?? []);
+      if (cleanup.skipped.length) {
+        reportWarning(`Chapter ${ch.index + 1}, block ${i + 1}: skipped ${cleanup.skipped.length} cleanup edit(s) and kept the source text there (${cleanup.skipped.slice(0, 3)
+          .map(({ find, reason }) => `${JSON.stringify(find.slice(0, 40))}: ${reason}`).join('; ')}${cleanup.skipped.length > 3 ? '; …' : ''}).`);
+      }
+      const cleanedText = normalizeNonBreakingSpaces(dropLayoutOnlyParagraphs(cleanup.text));
       const observations = analysis.isFiction ? result.characters.map((character) => ({ ...character, chunk: i })) : [];
       cleanedParts.push(cleanedText);
       partialSummaries.push(result.partialSummary);

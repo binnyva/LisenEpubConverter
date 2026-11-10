@@ -131,11 +131,11 @@ describe('book character registry', () => {
 describe('character discovery orchestration', () => {
   it('collects observations while cleaning, resumes selected chapters, and lists only after all chapters', async () => {
     const { work, options } = fixture();
-    llm.mockResolvedValueOnce({ cleanedText: 'First.', partialSummary: 'First.', characters: [observation('Alice')] });
+    llm.mockResolvedValueOnce({ edits: [], partialSummary: 'First.', characters: [observation('Alice')] });
     await runStage({ ...options, stage: 'chapters', chapterIndexes: [0] });
     expect(new WorkDir(options.epubPath, options.workRoot).completedChapters('chapters')).toEqual([0]);
     await expect(runStage({ ...options, stage: 'list-characters' })).rejects.toThrow('Run chapters');
-    llm.mockResolvedValueOnce({ cleanedText: 'Second.', partialSummary: 'Second.', characters: [observation('Bob')] });
+    llm.mockResolvedValueOnce({ edits: [], partialSummary: 'Second.', characters: [observation('Bob')] });
     await runStage({ ...options, stage: 'chapters', chapterIndexes: [1] });
     expect(llm.mock.calls[1][0].user).toContain('Alice');
     expect(new WorkDir(options.epubPath, options.workRoot).isDone('chapters')).toBe(true);
@@ -155,7 +155,7 @@ describe('character discovery orchestration', () => {
     expect(fs.readFileSync(work.path('chapters-clean/00.md'), 'utf8')).toBe('Existing cleaned text.');
     expect(work.readJson('chapter-summaries.json')).toEqual({ 0: 'Existing summary.' });
     expect(work.readJson<any>(characterChapterFile(0)).observations[0].name).toBe('Late speaker');
-    expect(llm.mock.calls[0][0].system).not.toContain('cleanedText');
+    expect(llm.mock.calls[0][0].system).not.toContain('"edits"');
   });
 
   it('replaces rerun chapter observations while retaining other chapter discoveries and audio cache', async () => {
@@ -169,7 +169,7 @@ describe('character discovery orchestration', () => {
     work.markDone('chapters');
     work.markDone('list-characters');
     work.markDone('script');
-    llm.mockResolvedValueOnce({ cleanedText: 'New.', partialSummary: 'New.', characters: [observation('New')] });
+    llm.mockResolvedValueOnce({ edits: [], partialSummary: 'New.', characters: [observation('New')] });
     await runStage({ ...options, stage: 'chapters', chapterIndexes: [0], rerun: true });
     expect(work.readJson<any>(characterChapterFile(0)).observations[0].name).toBe('New');
     expect(work.readJson<any>(characterChapterFile(1)).observations[0].name).toBe('Keep');
@@ -246,7 +246,7 @@ describe('character discovery orchestration', () => {
   it('turns reasoning off when cleaning a new non-fiction chapter', async () => {
     const { work, options } = fixture(1);
     work.writeJson('analysis.json', { ...work.readJson<object>('analysis.json'), isFiction: false });
-    llm.mockResolvedValue({ cleanedText: 'Chapter 0: Hello.', partialSummary: 'A greeting.', characters: [] });
+    llm.mockResolvedValue({ edits: [], partialSummary: 'A greeting.', characters: [] });
 
     await runStage({ ...options, stage: 'chapters' });
 

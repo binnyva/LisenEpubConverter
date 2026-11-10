@@ -80,7 +80,7 @@ describe('stage activities', () => {
 
   it('measures selected chapter text and reports reuse and discovery-only backfills', async () => {
     const { options, work, events } = fixture();
-    llm.mockResolvedValue({ cleanedText: 'Cleaned.', partialSummary: 'Summary.', characters: [] });
+    llm.mockResolvedValue({ edits: [], partialSummary: 'Summary.', characters: [] });
     await runStage({ ...options, stage: 'chapters', chapterIndexes: [1], rerun: true });
     expect(events.some((event) => event.progress && 'activity' in event.progress && event.progress.activity.includes('block 2/2') && event.progress.completedUnits === 8000 && event.progress.totalUnits === 11000)).toBe(true);
     expect(events.filter((event) => event.progress?.phase === 'completed').at(-1)?.progress).toMatchObject({ completedChapters: 1, totalChapters: 1 });
@@ -95,7 +95,7 @@ describe('stage activities', () => {
     events.length = 0;
     await runStage({ ...options, stage: 'chapters', chapterIndexes: [1] });
     expect(events.some((event) => event.progress && 'activity' in event.progress && event.progress.activity.includes('Discovering speakers in block 2/2'))).toBe(true);
-    expect(fs.readFileSync(work.path('chapters-clean/01.md'), 'utf8')).toBe('Cleaned.\n\nCleaned.');
+    expect(fs.readFileSync(work.path('chapters-clean/01.md'), 'utf8')).toBe('A'.repeat(8000) + '\n\n' + 'B'.repeat(3000));
   });
 
   it('counts cached and out-of-order synthesized segments without changing cache inputs', async () => {

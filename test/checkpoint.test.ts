@@ -44,7 +44,7 @@ function fixture(isFiction: boolean) {
   return { work, options: { sourcePath: epubPath, workRoot: root } };
 }
 
-const cleaned = (text: string) => ({ cleanedText: text, partialSummary: `Summary of ${text.slice(0, 6)}.`, characters: [] });
+const cleaned = (text: string) => ({ edits: [], partialSummary: `Summary of ${text.slice(0, 6)}.`, characters: [] });
 const userPrompt = (call: number): string => (llm.mock.calls[call][0] as { user: string }).user;
 
 describe('per-block checkpoints', () => {
