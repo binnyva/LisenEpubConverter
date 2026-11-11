@@ -6,6 +6,7 @@ import { z } from 'zod';
 import { config, type OpenRouterReasoningEffort } from '../../config.js';
 import { reportWarning } from '../../util/warnings.js';
 import { TaskCancelledError, taskCancellationSignal, waitForRetry } from '../../util/cancellation.js';
+import { recordLlmUsage } from '../../util/usage.js';
 
 let client: OpenAI | undefined;
 
@@ -158,6 +159,7 @@ async function createCompletion(
   const cancellationSignal = taskCancellationSignal();
   const signal = cancellationSignal ? AbortSignal.any([controller.signal, cancellationSignal]) : controller.signal;
 
+  const effort: OpenRouterReasoningEffort = disableReasoning ? 'none' : reasoningEffort ?? config.openRouterReasoningEffort;
   try {
     if (config.llmProvider === 'openai') {
       const res = await getClient().chat.completions.create({
@@ -165,8 +167,15 @@ async function createCompletion(
         messages,
         response_format: { type: 'json_object' },
         max_completion_tokens: maxCompletionTokens ?? config.llmMaxCompletionTokens,
-        ...(!disableReasoning && reasoningEffort && reasoningEffort !== 'none' ? { reasoning_effort: reasoningEffort } : {}),
+        // OpenAI's chat models do not reason unless asked, so "off" and "default" both send nothing.
+        ...(effort !== 'none' && effort !== 'default' ? { reasoning_effort: effort } : {}),
       }, { signal });
+      // Counted before any check below: a response that is rejected was still paid for.
+      recordLlmUsage(model, {
+        promptTokens: res.usage?.prompt_tokens,
+        completionTokens: res.usage?.completion_tokens,
+        reasoningTokens: res.usage?.completion_tokens_details?.reasoning_tokens,
+      });
       if (res.choices[0]?.finish_reason === 'length') {
         throw new NonRetryableLLMError('LLM response reached its completion token limit. Increase LISEN_SCRIPT_MAX_COMPLETION_TOKENS for Script reasoning, or LISEN_LLM_MAX_COMPLETION_TOKENS for other stages.');
       }
@@ -184,15 +193,12 @@ async function createCompletion(
       // `max_tokens`. With require_parameters enabled, the OpenAI-specific
       // `max_completion_tokens` name can exclude otherwise compatible routes.
       max_tokens: maxCompletionTokens ?? config.llmMaxCompletionTokens,
-      // Chapter cleanup and the other Lisen stages need schema-shaped output,
-      // not a reasoning transcript. Omitting this when disabled is important:
-      // require_parameters would otherwise exclude endpoints that do not
-      // expose OpenRouter's optional reasoning parameter.
-      ...(disableReasoning
-        ? { reasoning: { enabled: false } }
-        : (reasoningEffort ?? config.openRouterReasoningEffort) === 'none'
-          ? {}
-          : { reasoning: { effort: reasoningEffort ?? config.openRouterReasoningEffort } }),
+      // The stages need schema-shaped output, not a reasoning transcript, so
+      // reasoning is switched off unless an effort is configured. Sending
+      // nothing would leave it to the model, and many reason by default.
+      // "default" does send nothing: with require_parameters, an endpoint that
+      // does not expose the reasoning parameter is otherwise excluded.
+      ...(effort === 'default' ? {} : effort === 'none' ? { reasoning: { enabled: false } } : { reasoning: { effort } }),
       // Do not let OpenRouter route to a provider that would silently ignore
       // JSON mode; every pipeline stage relies on schema-valid JSON.
       provider: {
@@ -249,8 +255,18 @@ async function createCompletion(
       if (res.status === 429 || res.status === 408 || res.status >= 500) {
         throw new RetryableLLMError(message, retryAfterMs(res));
       }
-      throw new NonRetryableLLMError(message);
+      const hint = effort === 'none' && res.status === 404
+        ? ' If no endpoint of this model accepts a reasoning setting, set LISEN_OPENROUTER_REASONING_EFFORT=default (and LISEN_SCRIPT_REASONING_EFFORT=default) to stop sending one.'
+        : '';
+      throw new NonRetryableLLMError(message + hint);
     }
+    const used = (body as OpenRouterResponse).usage;
+    const count = (value: unknown): number | undefined => (typeof value === 'number' ? value : undefined);
+    recordLlmUsage(model, {
+      promptTokens: count(used?.prompt_tokens),
+      completionTokens: count(used?.completion_tokens),
+      reasoningTokens: count(used?.completion_tokens_details?.reasoning_tokens),
+    });
     if ((body as OpenRouterResponse).choices?.[0]?.finish_reason === 'length') {
       throw new NonRetryableLLMError(`LLM response reached its completion token limit. Increase LISEN_SCRIPT_MAX_COMPLETION_TOKENS for Script reasoning, or LISEN_LLM_MAX_COMPLETION_TOKENS for other stages. Diagnostics: ${diagnostics}`);
     }
@@ -284,6 +300,8 @@ export async function jsonCall<S extends z.ZodType>(opts: {
   disableReasoning?: boolean;
   maxCompletionTokens?: number;
   maxRetries?: number;
+  /** A check the schema cannot express. A returned message is fed back to the model like a schema error. */
+  validate?: (value: z.infer<S>) => string | undefined;
 }): Promise<z.infer<S>> {
   const maxRetries = opts.maxRetries ?? config.llmMaxRetries;
   let lastError = '';
@@ -317,6 +335,8 @@ export async function jsonCall<S extends z.ZodType>(opts: {
 
     try {
       const parsed = opts.schema.parse(JSON.parse(raw));
+      const problem = opts.validate?.(parsed);
+      if (problem) throw new Error(problem);
       return parsed;
     } catch (err) {
       lastError = (err as Error).message.slice(0, 2000);

@@ -7,13 +7,16 @@ import { markdownToSpeakable } from '../epub/markdown.js';
 import { splitSentences } from '../util/text.js';
 import { config } from '../config.js';
 import { reportProgress } from '../util/progress.js';
+import { recordTtsUsage } from '../util/usage.js';
 import { throwIfTaskCancelled, taskCancellationSignal, waitForRetry } from '../util/cancellation.js';
 import { validateVoiceBindings } from './voices.js';
 import type { WorkDir } from '../state.js';
 import type { BookMetadata, Casting, ChapterAudioEntry, ChapterAudioManifest, ChapterScript } from '../types.js';
+import { AUDIO_CACHE_DIR, AUDIO_DIR, MANIFEST_EXT, METADATA_FILE, SCRIPTS_DIR, chapterFile, listChapterFiles } from '../layout.js';
+import { chapterTitle as titleOf } from './stories.js';
 
 /**
- * Stage 8: synthesize every script segment to MP3. Each unique
+ * Stage 6: synthesize every script segment to MP3. Each unique
  * (text, voice, instructions) is cached by content hash, so re-runs and
  * crashes never pay for the same audio twice.
  */
@@ -22,7 +25,7 @@ export async function runSynth(work: WorkDir, chapterIndexes?: number[]): Promis
   reportProgress({ activity: 'Validating saved voice bindings and preparing speech requests' });
   const casting = work.readJson<Casting>('casting.json');
   const bindings = validateVoiceBindings(work);
-  const meta = work.readJson<BookMetadata>('metadata.json');
+  const meta = work.readJson<BookMetadata>(METADATA_FILE);
   const provider = getTTSProvider(bindings.target, bindings.libraryFile);
 
   // Casting instructions that mention a nationality or accent ("Portuguese-
@@ -34,14 +37,13 @@ export async function runSynth(work: WorkDir, chapterIndexes?: number[]): Promis
   const languageName =
     new Intl.DisplayNames(['en'], { type: 'language' }).of(meta.language) ?? meta.language;
   const languageGuard = `Speak in ${languageName}, reading the text verbatim; never translate it into another language. Any accent described below affects pronunciation only.`;
-  const cacheDir = work.dir('audio-cache');
-  work.dir('audio');
+  const cacheDir = work.dir(AUDIO_CACHE_DIR);
+  work.dir(AUDIO_DIR);
 
   const limit = pLimit(config.ttsConcurrency);
-  const scriptFiles = fs
-    .readdirSync(work.path('script'))
-    .filter((file) => !chapterIndexes || chapterIndexes.includes(Number.parseInt(file, 10)))
-    .sort();
+  const scriptFiles = listChapterFiles(work.root, SCRIPTS_DIR, '.json')
+    .filter(({ index }) => !chapterIndexes || chapterIndexes.includes(index))
+    .map(({ file }) => file);
 
   let total = 0;
   let cached = 0;
@@ -49,10 +51,10 @@ export async function runSynth(work: WorkDir, chapterIndexes?: number[]): Promis
 
   for (const file of scriptFiles) {
     throwIfTaskCancelled();
-    const script = work.readJson<ChapterScript>(`script/${file}`);
-    const chapterTitle = meta.chapters.find((chapter) => chapter.index === script.index)?.title ?? `Chapter ${script.index}`;
+    const script = work.readJson<ChapterScript>(file);
+    const chapterTitle = titleOf(meta, script.index);
     reportProgress({ activity: 'Preparing audio segments', chapterIndex: script.index, chapterTitle, completedChapters, totalChapters: scriptFiles.length });
-    const manifestFile = `audio/${String(script.index).padStart(2, '0')}-segments.json`;
+    const manifestFile = chapterFile(work.root, AUDIO_DIR, script.index, chapterTitle, MANIFEST_EXT);
 
     type SpeechPiece = { hash: string; text: string; voiceId: string; instructions: string };
     const pieces: Array<SpeechPiece | { pauseMs: number }> = [];
@@ -139,12 +141,14 @@ async function synthesizeWithRetry(
   let lastErr: unknown;
   for (let attempt = 1; attempt <= 4; attempt++) {
     try {
-      return await provider.synthesize({
+      const audio = await provider.synthesize({
         text: piece.text,
         voiceId: piece.voiceId,
         instructions: [languageGuard, piece.instructions].filter(Boolean).join(' '),
         signal: taskCancellationSignal(),
       });
+      recordTtsUsage(piece.text.length);
+      return audio;
     } catch (err) {
       throwIfTaskCancelled();
       lastErr = err;

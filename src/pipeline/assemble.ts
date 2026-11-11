@@ -7,6 +7,8 @@ import { reportProgress } from '../util/progress.js';
 import { taskCancellationSignal, throwIfTaskCancelled } from '../util/cancellation.js';
 import type { WorkDir } from '../state.js';
 import type { BookMetadata, ChapterAudioEntry, ChapterAudioManifest } from '../types.js';
+import { AUDIO_CACHE_DIR, AUDIO_DIR, MANIFEST_EXT, METADATA_FILE, chapterFile, listChapterFiles } from '../layout.js';
+import { chapterTitle as titleOf } from './stories.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -46,7 +48,7 @@ async function audioFormatOf(file: string): Promise<{ rate: string; channels: st
  * alongside synthesized speech.
  */
 async function silenceFile(work: WorkDir, pauseMs: number, format: { rate: string; channels: string }): Promise<string> {
-  const file = work.path('audio', `silence-${pauseMs}ms-${format.rate}-${format.channels}.mp3`);
+  const file = work.path(AUDIO_DIR, `silence-${pauseMs}ms-${format.rate}-${format.channels}.mp3`);
   if (fs.existsSync(file)) return file;
   const layout = format.channels === '1' ? 'mono' : 'stereo';
   const source = ['-f', 'lavfi', '-i', `anullsrc=r=${format.rate}:cl=${layout}`, '-t', String(pauseMs / 1000)];
@@ -72,38 +74,37 @@ function escapeMeta(s: string): string {
 }
 
 /**
- * Stage 9: concatenate cached segments into per-chapter M4A files, then all
- * chapters into a single M4B with chapter markers, tags and cover art.
+ * Stage 7: concatenate cached MP3 segments into one AAC-encoded M4A per
+ * chapter (the only encode after synthesis), then stream-copy the chapters
+ * into a single M4B with chapter markers, tags and cover art.
  */
 export async function runAssemble(work: WorkDir, outDir?: string, chapterIndexes?: number[]): Promise<string> {
   throwIfTaskCancelled();
   reportProgress({ activity: 'Reading synthesized chapter manifests' });
-  const meta = work.readJson<BookMetadata>('metadata.json');
-  work.dir('audio');
+  const meta = work.readJson<BookMetadata>(METADATA_FILE);
+  work.dir(AUDIO_DIR);
 
-  const manifests = fs
-    .readdirSync(work.path('audio'))
-    .filter((f) => f.endsWith('-segments.json'))
-    .filter((f) => !chapterIndexes || chapterIndexes.includes(Number.parseInt(f, 10)))
-    .sort()
-    .map((f) => work.readJson<ChapterAudioManifest>(`audio/${f}`));
+  const manifestFiles = listChapterFiles(work.root, AUDIO_DIR, MANIFEST_EXT)
+    .filter(({ index }) => !chapterIndexes || chapterIndexes.includes(index));
+  const manifests = manifestFiles.map(({ file }) => work.readJson<ChapterAudioManifest>(file));
+  const manifestPath = new Map(manifestFiles.map(({ index, file }) => [index, work.path(file)]));
+  const encodedPath = (index: number): string => work.path(chapterFile(work.root, AUDIO_DIR, index, titleOf(meta, index), '.m4a'));
   if (manifests.length === 0) throw new Error('No synthesized chapters found — run synth first.');
 
   // 1. Per-chapter concat + AAC encode (skipped when the chapter m4a exists).
-  const chapterTitle = (index: number): string =>
-    meta.chapters.find((c) => c.index === index)?.title ?? `Chapter ${index}`;
+  const chapterTitle = (index: number): string => titleOf(meta, index);
   let encoded = 0;
   for (const manifest of manifests) {
     throwIfTaskCancelled();
-    const chapterFile = work.path('audio', `${String(manifest.index).padStart(2, '0')}.m4a`);
+    const encodedFile = encodedPath(manifest.index);
     const progress = (activity: string) => reportProgress({ activity,
       chapterIndex: manifest.index, chapterTitle: chapterTitle(manifest.index),
       completedUnits: encoded, totalUnits: manifests.length, unit: 'chapters encoded',
     });
-    const manifestFile = work.path('audio', `${String(manifest.index).padStart(2, '0')}-segments.json`);
+    const manifestFile = manifestPath.get(manifest.index)!;
     // A manifest rewritten after this encode (new pauses, a changed script)
     // makes the existing file stale, so reuse it only while it is newer.
-    if (fs.existsSync(chapterFile) && fs.statSync(chapterFile).mtimeMs >= fs.statSync(manifestFile).mtimeMs) {
+    if (fs.existsSync(encodedFile) && fs.statSync(encodedFile).mtimeMs >= fs.statSync(manifestFile).mtimeMs) {
       encoded++;
       progress('Reusing encoded chapter');
       continue;
@@ -115,15 +116,15 @@ export async function runAssemble(work: WorkDir, outDir?: string, chapterIndexes
     if (pauses.length) {
       const firstHash = manifest.segments.find((entry): entry is string => typeof entry === 'string');
       if (!firstHash) throw new Error(`Chapter ${manifest.index + 1} has no synthesized speech — rerun synth for it.`);
-      const format = await audioFormatOf(work.path('audio-cache', `${firstHash}.mp3`));
+      const format = await audioFormatOf(work.path(AUDIO_CACHE_DIR, `${firstHash}.mp3`));
       for (const { pauseMs } of pauses) {
         if (!silence.has(pauseMs)) silence.set(pauseMs, await silenceFile(work, pauseMs, format));
       }
     }
     const sourceOf = (entry: ChapterAudioEntry): string =>
-      typeof entry === 'string' ? work.path('audio-cache', `${entry}.mp3`) : silence.get(entry.pauseMs)!;
+      typeof entry === 'string' ? work.path(AUDIO_CACHE_DIR, `${entry}.mp3`) : silence.get(entry.pauseMs)!;
 
-    const listFile = work.path('audio', `concat-${manifest.index}.txt`);
+    const listFile = work.path(AUDIO_DIR, `concat-${manifest.index}.txt`);
     fs.writeFileSync(
       listFile,
       manifest.segments
@@ -131,14 +132,15 @@ export async function runAssemble(work: WorkDir, outDir?: string, chapterIndexes
         .join('\n')
     );
     // Publish only successful encodes so a failed request can be resumed safely.
-    const pendingFile = chapterFile + '.tmp.m4a';
+    // Named so it is never mistaken for a chapter's finished file.
+    const pendingFile = work.path(AUDIO_DIR, `pending-${manifest.index}.m4a`);
     try {
       await ffmpeg([
         '-f', 'concat', '-safe', '0', '-i', listFile,
         '-c:a', 'aac', '-b:a', config.audioBitrate, '-ar', '44100', '-ac', '1',
         pendingFile,
       ]);
-      fs.renameSync(pendingFile, chapterFile);
+      fs.renameSync(pendingFile, encodedFile);
     } finally {
       fs.rmSync(pendingFile, { force: true });
     }
@@ -155,23 +157,23 @@ export async function runAssemble(work: WorkDir, outDir?: string, chapterIndexes
   const chapterFiles: string[] = [];
   for (const manifest of manifests) {
     throwIfTaskCancelled();
-    const file = work.path('audio', `${String(manifest.index).padStart(2, '0')}.m4a`);
+    const file = encodedPath(manifest.index);
     chapterFiles.push(file);
     const durMs = Math.round(await durationOf(file) * 1000);
     ffmeta += `\n[CHAPTER]\nTIMEBASE=1/1000\nSTART=${cursorMs}\nEND=${cursorMs + durMs}\ntitle=${escapeMeta(chapterTitle(manifest.index))}\n`;
     cursorMs += durMs;
     reportProgress({ activity: 'Building chapter markers', completedUnits: chapterFiles.length, totalUnits: manifests.length, unit: 'chapter durations read' });
   }
-  const ffmetaFile = work.path('audio', 'ffmetadata.txt');
+  const ffmetaFile = work.path(AUDIO_DIR, 'ffmetadata.txt');
   fs.writeFileSync(ffmetaFile, ffmeta);
 
   // 3. Concat chapters (stream copy — identical encoding) into one m4a.
-  const concatList = work.path('audio', 'concat-book.txt');
+  const concatList = work.path(AUDIO_DIR, 'concat-book.txt');
   fs.writeFileSync(
     concatList,
     chapterFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join('\n')
   );
-  const bookM4a = work.path('audio', 'book.m4a');
+  const bookM4a = work.path(AUDIO_DIR, 'book.m4a');
   reportProgress({ activity: 'Joining encoded chapters — waiting for ffmpeg' });
   await ffmpeg(['-f', 'concat', '-safe', '0', '-i', concatList, '-c', 'copy', bookM4a]);
   throwIfTaskCancelled();

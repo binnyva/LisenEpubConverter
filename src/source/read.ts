@@ -27,6 +27,9 @@ export interface ParsedSource {
   title: string;
   author: string;
   language: string;
+  subjects: string[];
+  /** The source's own description of itself, as plain text. */
+  description: string;
   chapters: SourceChapter[];
   cover?: { data: Buffer; ext: string };
   /** Hash of downloaded URL content, used to record the exact retrieved source. */
@@ -89,6 +92,8 @@ async function readEpub(sourcePath: string): Promise<ParsedSource> {
     title: epub.title,
     author: epub.author,
     language: epub.language,
+    subjects: epub.subjects,
+    description: epub.description,
     chapters: epub.spine.map((item, index) => ({
       id: item.id,
       title: epub.tocTitles.get(item.href) || firstHeading(item.html) || `Section ${index + 1}`,
@@ -130,8 +135,10 @@ function parseHtml(sourcePath: string, html: string): ParsedSource {
   const title = $('title').first().text().trim() || $('h1').first().text().trim() || titleFromPath(sourcePath);
   const author = $('meta[name="author" i], meta[property="article:author" i]').first().attr('content')?.trim() || 'Unknown';
   const language = $('html').attr('lang')?.trim() || 'en';
+  const description = $('meta[name="description" i], meta[property="og:description" i]').first().attr('content')?.replace(/\s+/g, ' ').trim() ?? '';
+  const subjects = splitList($('meta[name="keywords" i]').first().attr('content'));
   return {
-    format: 'html', title, author, language,
+    format: 'html', title, author, language, subjects, description,
     chapters: [{ id: 'source', title, markdown: htmlToMarkdown(content), isNav: false }],
   };
 }
@@ -174,6 +181,8 @@ async function readMarkdown(sourcePath: string): Promise<ParsedSource> {
     title,
     author: attributes.author || 'Unknown',
     language: attributes.language || attributes.lang || 'en',
+    subjects: splitList(attributes.subjects || attributes.tags || attributes.keywords),
+    description: attributes.description || '',
     chapters: [{ id: 'source', title, markdown: body.trim(), isNav: false }],
   };
 }
@@ -214,6 +223,8 @@ async function readPdf(sourcePath: string): Promise<ParsedSource> {
     const author = stringMetadata(metadata.Author) || 'Unknown';
     return {
       format: 'pdf', title, author, language: 'en',
+      subjects: splitList(stringMetadata(metadata.Keywords)),
+      description: stringMetadata(metadata.Subject) ?? '',
       chapters: [{ id: 'source', title, markdown, isNav: false }],
     };
   } finally {
@@ -257,6 +268,11 @@ function titleFromPath(sourcePath: string): string {
     return leaf.replace(/\.[A-Za-z0-9]+$/, '').replace(/[-_]+/g, ' ').trim() || url.hostname;
   }
   return path.basename(sourcePath, path.extname(sourcePath)).replace(/[-_]+/g, ' ').trim() || 'Untitled';
+}
+
+/** A comma- or semicolon-separated list, with front-matter brackets tolerated. */
+function splitList(value: string | undefined): string[] {
+  return (value ?? '').replace(/^\[|\]$/g, '').split(/[,;]/).map((item) => item.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
 }
 
 function cleanOverride(value: string | undefined): string | undefined {

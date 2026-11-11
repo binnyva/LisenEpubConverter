@@ -1,0 +1,27 @@
+[
+  {
+    "runId": "script-2026-11-11T15:41:24.599Z",
+    "stage": "script",
+    "startedAt": "2026-11-11T15:41:24.599Z",
+    "wallMs": 1047318,
+    "outcome": "completed",
+    "llm": {
+      "calls": 8,
+      "promptTokens": 20656,
+      "completionTokens": 65936,
+      "reasoningTokens": 59529
+    },
+    "models": {
+      "qwen/qwen3.8-flash": {
+        "calls": 8,
+        "promptTokens": 20656,
+        "completionTokens": 65936,
+        "reasoningTokens": 59529
+      }
+    },
+    "tts": {
+      "calls": 0,
+      "characters": 0
+    }
+  }
+]

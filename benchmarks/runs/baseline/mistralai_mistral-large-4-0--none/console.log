@@ -1,0 +1,6 @@
+[script] Running script…
+[script] Chapter 0: "The Last Question" — Preparing script · 0/1 chapters complete · 0s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 1/7 (0% of text processed) — waiting for model response · 0/1 chapters complete · 0s elapsed
+[script] script usage: no model calls · 4s
+
+Error: OpenRouter LLM request failed (400): Provider returned error ({"object":"error","message":"reasoning_effort none is not supported for this model, supported values: [<ReasoningEffort.high: 'high'>, <ReasoningEffort.low: 'low'>, <ReasoningEffort.medium: 'medium'>]","type":"invalid_request_invalid_args","param":null,"code":"3051","raw_status_code":400}). Diagnostics: {"content":"undefined","errorCode":400,"upstreamError":"{\"object\":\"error\",\"message\":\"reasoning_effort none is not supported for this model, supported values: [<ReasoningEffort.high: 'high'>, <ReasoningEffort.low: 'low'>, <ReasoningEffort.medium: 'medium'>]\",\"type\":\"invalid_request_invalid_args\",\"param\":null,\"code\":\"3051\",\"raw_status_code\":400}"}

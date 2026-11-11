@@ -32,7 +32,7 @@ describe('voice library bindings', () => {
       narrator: { voiceProfile: { presentation: 'male', tone: ['deep', 'dramatic'] }, instructions: 'Narrate in British English.' },
       characters: { Alice: { voiceProfile: { presentation: 'female', age: 'young', tone: ['sincere'] }, instructions: 'Curious.' } },
     });
-    work.writeJson('script/00.json', { index: 0, segments: [{ speaker: 'Alice', text: 'Hello.' }] });
+    work.writeJson('1-scripts/00-one.json', { index: 0, segments: [{ speaker: 'Alice', text: 'Hello.' }] });
     const options = { epubPath: epub, workRoot: root, outDir: root, stage: 'voices' as const, voiceTarget: { provider: 'fish' as const, model: 's2.1-pro' }, voiceLibraryFile: libraryFile, rerun: true };
     await runStage(options);
     const first = validateVoiceBindings(work);
@@ -44,7 +44,7 @@ describe('voice library bindings', () => {
     await runStage(options);
     expect(validateVoiceBindings(work).characters.Alice.selection).toBe('manual');
     expect(new WorkDir(epub, root).isDone('voices')).toBe(true);
-    expect(fs.existsSync(work.path('audio'))).toBe(false);
+    expect(fs.existsSync(work.path('3-audio'))).toBe(false);
     expect(() => refreshVoiceLibrary({ provider: 'openai', model: 'gpt-4o-mini-tts' }, libraryFile)).toThrow('Version-2');
     expect(loadVoiceLibrary(libraryFile).sources).toEqual(library.sources);
   });
@@ -56,7 +56,7 @@ describe('voice library bindings', () => {
     fs.writeFileSync(epub, crypto.randomBytes(32));
     const work = new WorkDir(epub, root);
     work.writeJson('casting.json', { version: 2, narrator: { voiceProfile: {} }, characters: {} });
-    work.writeJson('script/00.json', { index: 0, segments: [{ speaker: 'The Duchess', text: 'Hello.' }] });
+    work.writeJson('1-scripts/00-one.json', { index: 0, segments: [{ speaker: 'The Duchess', text: 'Hello.' }] });
     expect(() => runVoices(work, { provider: 'fish', model: 's2.1-pro' }, path.resolve('library/voices.json'))).toThrow('The Duchess');
     expect(fs.existsSync(work.path('voice-bindings.json'))).toBe(false);
   });
@@ -149,7 +149,7 @@ describe('voice library bindings', () => {
     expect(bindings.characters.Bob.match.reasons).toContain('Matches en language.');
   });
 
-  it('migrates a legacy model-specific cast before applying library voices', () => {
+  it('rejects a cast that is not in the casting format, without rewriting it', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lisen-legacy-voices-'));
     roots.push(root);
     const epub = path.join(root, 'book.epub');
@@ -162,8 +162,9 @@ describe('voice library bindings', () => {
     const work = new WorkDir(epub, root);
     work.writeJson('casting.json', { narrator: { voiceId: 'legacy-narrator', instructions: 'Steady.' }, characters: {} });
 
-    expect(runVoices(work, { provider: 'openai', model: 'test-tts' }).narrator.voiceId).toBe('voice-a');
-    expect(fs.existsSync(work.path('casting.legacy.json'))).toBe(true);
-    expect(work.readJson<{ version: number }>('casting.json').version).toBe(2);
+    const saved = fs.readFileSync(work.path('casting.json'), 'utf8');
+    expect(() => runVoices(work, { provider: 'openai', model: 'test-tts' })).toThrow('Re-run the casting stage');
+    expect(fs.readFileSync(work.path('casting.json'), 'utf8')).toBe(saved);
+    expect(fs.existsSync(work.path('voice-bindings.json'))).toBe(false);
   });
 });

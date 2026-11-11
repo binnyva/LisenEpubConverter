@@ -1,0 +1,6 @@
+[script] Running script…
+[script] Chapter 0: "The Last Question" — Preparing script · 0/1 chapters complete · 0s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 1/7 (0% of text processed) — waiting for model response · 0/1 chapters complete · 0s elapsed
+[script] script usage: no model calls · 0s
+
+Error: OpenRouter LLM request failed (400): Reasoning is mandatory for this endpoint and cannot be disabled.. Diagnostics: {"content":"undefined","errorCode":400}

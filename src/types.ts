@@ -25,51 +25,76 @@ export interface BookMetadata {
   title: string;
   author: string;
   language: string;
+  /** Subject headings from the source, when it carries any. */
+  subjects: string[];
+  /** The source's own description, often the publisher's blurb. */
+  description: string;
   /** Cover image path relative to the work dir, if found. */
   coverFile?: string;
   chapters: ExtractedChapter[];
+  /**
+   * Written by the Metadata stage and absent until it has run. Extract owns
+   * every other field, so Metadata can be rebuilt without extracting again.
+   */
+  profile?: BookProfile;
 }
 
-// ---------- Stage 2: analyze ----------
+// ---------- Stage 2: metadata ----------
 
-export const PersonProfileSchema = z.object({
-  name: z.string(),
-  aliases: z.array(z.string()).default([]),
-  sex: z.enum(['male', 'female', 'unknown']).default('unknown'),
-  /** Approximate age or life stage, e.g. "30s", "child", "elderly". */
-  age: z.string().default('unknown'),
+const SexSchema = z.enum(['male', 'female', 'unknown']).default('unknown');
+
+export const AuthorProfileSchema = z.object({
+  sex: SexSchema,
   race: z.string().default('unknown'),
-  /** Social class / occupation. */
-  class: z.string().default('unknown'),
-  /** Country or accent. */
+  /** Approximate age or life stage, e.g. "30s", "elderly". */
+  age: z.string().default('unknown'),
   country: z.string().default('unknown'),
-  importance: z.enum(['main', 'secondary', 'minor']).default('minor'),
 });
-export type PersonProfile = z.infer<typeof PersonProfileSchema>;
+export type AuthorProfile = z.infer<typeof AuthorProfileSchema>;
+
+export const BOOK_FORMS = ['novel', 'short story', 'short story collection', 'non-fiction'] as const;
 
 export const ChapterPlanSchema = z.object({
   index: z.number(),
+  /** The title as it should be read and displayed. */
+  title: z.string().default(''),
   narrate: z.boolean(),
   reason: z.string().default(''),
 });
+export type ChapterPlan = z.infer<typeof ChapterPlanSchema>;
 
-export const AnalysisSchema = z.object({
+/** What the Metadata call returns. */
+export const MetadataResponseSchema = z.object({
+  /** Whether the model knows this book. Its summary is only trusted when true. */
+  recognised: z.boolean(),
+  summary: z.string().default(''),
+  author: AuthorProfileSchema,
   isFiction: z.boolean(),
-  /** A short story collection or anthology: each story has its own cast. */
-  isCollection: z.boolean().default(false),
-  /** Short justification for the collection decision, for review. */
-  collectionReason: z.string().default(''),
+  form: z.enum(BOOK_FORMS),
+  genres: z.array(z.string()).default([]),
+  narrator: z.object({
+    pointOfView: z.enum(['first', 'third', 'unknown']).default('unknown'),
+    /** Apparent sex of a first-person narrator. */
+    sex: SexSchema,
+  }),
+  /** 'quoted' when dialogue sits inside quotation marks. */
+  dialogueStyle: z.enum(['quoted', 'unquoted']),
+  chapters: z.array(ChapterPlanSchema),
   /** Proposed story grouping for a collection; narratable chapters only. */
   stories: z.array(z.object({
     title: z.string().default(''),
     chapters: z.array(z.number().int().nonnegative()).default([]),
   })).default([]),
-  summary: z.string(),
-  characters: z.array(PersonProfileSchema).default([]),
-  author: PersonProfileSchema,
-  chapters: z.array(ChapterPlanSchema),
 });
-export type Analysis = z.infer<typeof AnalysisSchema>;
+export type MetadataResponse = z.infer<typeof MetadataResponseSchema>;
+
+export const BookProfileSchema = MetadataResponseSchema.extend({
+  /** Where the summary came from. Nothing downstream may depend on it. */
+  summarySource: z.enum(['model', 'blurb', 'none']),
+  /** Set when the book's own text overruled the model's dialogue style. */
+  dialogueStyleNote: z.string().optional(),
+});
+export type BookProfile = z.infer<typeof BookProfileSchema>;
 
 // ---------- Story grouping ----------
 
@@ -92,60 +117,73 @@ export const StoriesSchema = z.object({
 });
 export type Stories = z.infer<typeof StoriesSchema>;
 
-// ---------- Stage 3: chapters ----------
+// ---------- Stage 3: script ----------
 
-export interface ChapterSummaries {
-  /** Keyed by chapter index. */
-  [index: string]: string;
-}
-
-export const CharacterObservationSchema = PersonProfileSchema.extend({
-  /** Short quotation or concrete textual evidence for identity and traits. */
-  evidence: z.string().min(1),
+/** A speaker as the Script call reports one that the running cast lacks. */
+export const CharacterReportSchema = z.object({
+  name: z.string(),
+  aliases: z.array(z.string()).default([]),
+  sex: SexSchema,
+  /** Approximate age or life stage, e.g. "30s", "child", "elderly". */
+  age: z.string().default('unknown'),
   /** False for role descriptions such as "the station guard". */
-  named: z.boolean(),
-  confidence: z.enum(['high', 'low']),
+  named: z.boolean().default(true),
+  /** Short quotation supporting the identity. */
+  evidence: z.string().default(''),
 });
-export type CharacterObservation = z.infer<typeof CharacterObservationSchema>;
+export type CharacterReport = z.infer<typeof CharacterReportSchema>;
 
-export const ChapterCharactersSchema = z.object({
-  index: z.number().int().nonnegative(),
-  observations: z.array(CharacterObservationSchema.extend({ chunk: z.number().int().nonnegative() })),
+export const CastCharacterSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** Story scope id. */
+  story: z.string().default(BOOK_STORY_ID),
+  aliases: z.array(z.string()).default([]),
+  sex: SexSchema,
+  age: z.string().default('unknown'),
+  named: z.boolean().default(true),
+  /** Chapters the character was reported in. */
+  chapters: z.array(z.number().int().nonnegative()).default([]),
+  evidence: z.array(z.object({ chapter: z.number(), chunk: z.number(), text: z.string() })).default([]),
+  /** Uncertain merges and conflicts, for review. Never resolved by guessing. */
+  issues: z.array(z.string()).default([]),
 });
-export type ChapterCharacters = z.infer<typeof ChapterCharactersSchema>;
+export type CastCharacter = z.infer<typeof CastCharacterSchema>;
 
-// ---------- Stage 4: list characters ----------
+/** Dialogue whose speaker Script could not settle; it blocks the stage until reviewed. */
+export const UnresolvedSpeakerSchema = z.object({
+  story: z.string().default(BOOK_STORY_ID),
+  chapter: z.number().int().nonnegative(),
+  speaker: z.string(),
+  samples: z.array(z.object({ text: z.string(), context: z.string().default('') })).default([]),
+  /**
+   * A person's answer, for this chapter only: an existing character's name, or
+   * "narrator". Adding the speaker to the cast under the same name also settles it.
+   */
+  resolveAs: z.string().optional(),
+});
+export type UnresolvedSpeakerRecord = z.infer<typeof UnresolvedSpeakerSchema>;
 
+/** characters.json: the running cast, scoped per story, and what needs review. */
 export const CharacterRegistrySchema = z.object({
-  /** Version 1 had no story scope; readCharacterRegistry() migrates it. */
-  version: z.union([z.literal(1), z.literal(2)]).default(2),
-  chapters: z.array(z.number().int().nonnegative()),
-  /** Story scopes the characters were consolidated within. */
+  version: z.literal(3).default(3),
   stories: z.array(z.object({ id: z.string(), title: z.string().default('') })).default([]),
-  characters: z.array(PersonProfileSchema.extend({
-    id: z.string(),
-    /** Story scope id. Empty in version-1 registries and hand edits. */
-    story: z.string().default(''),
-    chapters: z.array(z.number().int().nonnegative()),
-    evidence: z.array(z.object({ chapter: z.number(), chunk: z.number(), text: z.string() })),
-    issues: z.array(z.string()),
-  })),
+  characters: z.array(CastCharacterSchema).default([]),
+  unresolved: z.array(UnresolvedSpeakerSchema).default([]),
 });
 export type CharacterRegistry = z.infer<typeof CharacterRegistrySchema>;
-
-// ---------- Stage 5: script ----------
 
 export const ScriptSegmentSchema = z.object({
   /** 'narrator' or a canonical name from the book's character registry. */
   speaker: z.string(),
-  /** Verbatim text to be spoken, or the divider a pause segment stands for. */
+  /** Text to be spoken, or the divider a pause segment stands for. */
   text: z.string(),
   /** Optional delivery hint for TTS instructions, e.g. "whispering". */
   delivery: z.string().optional(),
   confidence: z.enum(['high', 'low']).default('high'),
   /**
    * 'pause' is a scene break: silence instead of speech, with no TTS request
-   * and no cost. Absent means ordinary speech, so existing scripts stay valid.
+   * and no cost. Absent means ordinary speech.
    */
   kind: z.enum(['speech', 'pause']).optional(),
   /** Silence length of a pause segment; defaults to config.sceneBreakPauseMs. */
@@ -153,19 +191,25 @@ export const ScriptSegmentSchema = z.object({
 });
 export type ScriptSegment = z.infer<typeof ScriptSegmentSchema>;
 
+/** How a chapter was scripted: labelled spans, model-returned segments, or narration only. */
+export const SCRIPT_MODES = ['quoted', 'unquoted', 'narration'] as const;
+export type ScriptMode = (typeof SCRIPT_MODES)[number];
+
 export const ChapterScriptSchema = z.object({
   index: z.number(),
   /** Story scope this chapter was attributed within. */
   story: z.string().optional(),
-  /** Hash of this story's characters. Replaces characterRegistryHash. */
-  characterScopeHash: z.string().optional(),
-  /** Whole-registry hash written before story scopes existed. */
-  characterRegistryHash: z.string().optional(),
+  mode: z.enum(SCRIPT_MODES).optional(),
+  /**
+   * Hash of the chapter's own text, chunking and mode. The cast is not part
+   * of it: a new character must not invalidate chapters already scripted.
+   */
+  sourceHash: z.string().optional(),
   segments: z.array(ScriptSegmentSchema),
 });
 export type ChapterScript = z.infer<typeof ChapterScriptSchema>;
 
-// ---------- Stage 6: casting ----------
+// ---------- Stage 4: casting ----------
 
 export const VoiceProfileSchema = z.object({
   /** Desired presentation. This describes the character, not a provider voice. */
@@ -192,7 +236,7 @@ export const CastingSchema = z.object({
 });
 export type Casting = z.infer<typeof CastingSchema>;
 
-// ---------- Stage 7: voice bindings ----------
+// ---------- Stage 5: voice bindings ----------
 
 export const VoiceBindingSchema = z.object({
   libraryVoiceId: z.string(),
@@ -220,7 +264,7 @@ export const VoiceBindingsSchema = z.object({
 });
 export type VoiceBindings = z.infer<typeof VoiceBindingsSchema>;
 
-// ---------- Stage 8: synth ----------
+// ---------- Stage 6: synth ----------
 
 /** One piece of a chapter: an audio-cache hash, or a stretch of silence. */
 export type ChapterAudioEntry = string | { pauseMs: number };

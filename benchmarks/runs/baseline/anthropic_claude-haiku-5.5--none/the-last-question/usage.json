@@ -1,0 +1,27 @@
+[
+  {
+    "runId": "script-2026-11-11T15:39:53.185Z",
+    "stage": "script",
+    "startedAt": "2026-11-11T15:39:53.185Z",
+    "wallMs": 32502,
+    "outcome": "completed",
+    "llm": {
+      "calls": 11,
+      "promptTokens": 46452,
+      "completionTokens": 6441,
+      "reasoningTokens": 0
+    },
+    "models": {
+      "anthropic/claude-haiku-5.5": {
+        "calls": 11,
+        "promptTokens": 46452,
+        "completionTokens": 6441,
+        "reasoningTokens": 0
+      }
+    },
+    "tts": {
+      "calls": 0,
+      "characters": 0
+    }
+  }
+]

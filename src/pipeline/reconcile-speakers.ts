@@ -1,106 +1,38 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { z } from 'zod';
 import { config } from '../config.js';
 import { jsonCall } from '../providers/llm/openai.js';
-import { BOOK_STORY_ID, type ScriptSegment, type BookMetadata, type ChapterSummaries } from '../types.js';
+import { BOOK_STORY_ID, type CastCharacter, type UnresolvedSpeakerRecord } from '../types.js';
 import type { WorkDir } from '../state.js';
-import { readCharacterRegistry } from './list-characters.js';
-import { readStories, readStoriesFile, storyIdFor } from './stories.js';
-import type { Stories } from '../types.js';
-
-export interface UnresolvedSpeaker {
-  /** Stable within a work folder and shared with the workspace UI. */
-  key: string;
-  /** Story scope the dialogue belongs to; resolutions stay inside it. */
-  story: string;
-  speaker: string;
-  chapters: number[];
-  samples: Array<Pick<ScriptSegment, 'text' | 'delivery' | 'confidence'> & { chapter: number }>;
-}
+import { nameKey, readCharacterRegistry } from './cast.js';
+import { chapterTitle, readProfiledMetadata, readStories } from './stories.js';
 
 export interface SpeakerResolution {
+  /** Identifies one unresolved record: its chapter and speaker. */
   key: string;
+  chapter: number;
   speaker: string;
   /** Existing identities are safe to preselect; new roles still need confirmation in the UI. */
   resolution: 'existing' | 'new' | 'unresolved';
-  characterId?: string;
+  /** Canonical name of the existing character, for `resolveAs`. */
+  character?: string;
   reason: string;
   evidence: string;
 }
 
 const ReconciliationSchema = z.object({
   resolutions: z.array(z.object({
+    chapter: z.number().int(),
     speaker: z.string(),
     resolution: z.enum(['existing', 'new', 'unresolved']),
-    /** Must be an exact canonical name from the supplied registry for "existing". */
+    /** Must be an exact canonical name from the supplied cast for "existing". */
     character: z.string().optional(),
     reason: z.string(),
     evidence: z.string(),
   })),
 });
 
-const normalize = (value: string): string => value.normalize('NFKC').trim().toLocaleLowerCase();
-
-/** Read the stopped Script stage's evidence without trusting file names or malformed output. */
-export function unresolvedSpeakers(work: WorkDir): UnresolvedSpeaker[] {
-  let stories: Stories | undefined;
-  try {
-    stories = readStories(work);
-  } catch {
-    // A work folder without metadata still has reviewable candidates.
-    stories = undefined;
-  }
-  return unresolvedSpeakersIn(work.root, stories);
-}
-
-/** The same review list from a work folder path, for the local UI. */
-export function unresolvedSpeakersIn(root: string, grouping?: Stories): UnresolvedSpeaker[] {
-  const directory = path.join(root, 'character-candidates');
-  if (!fs.existsSync(directory)) return [];
-  const stories = grouping ?? readStoriesFile(root);
-  const groups = new Map<string, UnresolvedSpeaker>();
-  for (const file of fs.readdirSync(directory).filter((name) => name.endsWith('.json'))) {
-    let data: { index?: unknown; story?: unknown; candidates?: unknown };
-    try {
-      data = JSON.parse(fs.readFileSync(path.join(directory, file), 'utf8')) as { index?: unknown; story?: unknown; candidates?: unknown };
-    } catch {
-      continue;
-    }
-    if (!Number.isInteger(data.index) || !Array.isArray(data.candidates)) continue;
-    // One name can belong to two different people in two stories, so an
-    // unresolved speaker is reviewed within the story it was found in.
-    const story = typeof data.story === 'string' && data.story
-      ? data.story
-      : (stories ? storyIdFor(stories, data.index as number) : BOOK_STORY_ID);
-    for (const item of data.candidates) {
-      if (!item || typeof item !== 'object') continue;
-      const segment = item as Partial<ScriptSegment>;
-      const speaker = segment.speaker?.trim();
-      const text = segment.text?.trim();
-      if (!speaker || !text) continue;
-      const id = normalize(speaker);
-      if (!id || id === 'narrator') continue;
-      const group = groups.get(`${story}\x1f${id}`)
-        ?? { key: `candidate-${story}-${id}`, story, speaker, chapters: [], samples: [] };
-      if (!group.chapters.includes(data.index as number)) group.chapters.push(data.index as number);
-      if (group.samples.length < 3) {
-        group.samples.push({ chapter: data.index as number, text, delivery: segment.delivery, confidence: segment.confidence ?? 'low' });
-      }
-      groups.set(`${story}\x1f${id}`, group);
-    }
-  }
-  return [...groups.values()].sort((a, b) => a.speaker.localeCompare(b.speaker));
-}
-
-function chapterContext(metadata: BookMetadata, summaries: ChapterSummaries, candidate: UnresolvedSpeaker): string {
-  return candidate.chapters.map((index) => {
-    const title = metadata.chapters.find((chapter) => chapter.index === index)?.title ?? `Chapter ${index + 1}`;
-    const samples = candidate.samples.filter((sample) => sample.chapter === index)
-      .map((sample) => `Dialogue: ${JSON.stringify(sample.text)}`).join('\n');
-    return `Chapter ${index + 1}: ${JSON.stringify(title)}\nSummary: ${summaries[index] ?? 'No summary available.'}\n${samples}`;
-  }).join('\n\n');
-}
+export const unresolvedKey = (record: Pick<UnresolvedSpeakerRecord, 'chapter' | 'speaker'>): string =>
+  `${record.chapter}:${nameKey(record.speaker)}`;
 
 /**
  * Ask for conservative, reviewable choices after Script stops on an unknown
@@ -108,62 +40,65 @@ function chapterContext(metadata: BookMetadata, summaries: ChapterSummaries, can
  * show the proposal and require an explicit save before attribution changes.
  */
 export async function reconcileUnresolvedSpeakers(work: WorkDir): Promise<SpeakerResolution[]> {
-  const candidates = unresolvedSpeakers(work);
-  if (!candidates.length) throw new Error('There are no unresolved Script speakers to reconcile. Run Script first.');
+  const stories = readStories(work);
+  const registry = readCharacterRegistry(work, stories);
+  const pending = registry.unresolved.filter((record) => !record.resolveAs?.trim());
+  if (!pending.length) throw new Error('There are no unresolved Script speakers to reconcile. Run Script first.');
 
-  const registry = readCharacterRegistry(work);
-  const metadata = work.readJson<BookMetadata>('metadata.json');
-  const summaries = work.readJson<ChapterSummaries>('chapter-summaries.json');
-  const byStory = new Map<string, UnresolvedSpeaker[]>();
-  for (const candidate of candidates) {
-    byStory.set(candidate.story, [...(byStory.get(candidate.story) ?? []), candidate]);
-  }
+  const metadata = readProfiledMetadata(work);
+  const byStory = new Map<string, UnresolvedSpeakerRecord[]>();
+  for (const record of pending) byStory.set(record.story, [...(byStory.get(record.story) ?? []), record]);
+
   const resolutions: SpeakerResolution[] = [];
-  for (const [story, group] of byStory) {
-    resolutions.push(...await reconcileStory(registry.characters.filter((character) => (character.story || BOOK_STORY_ID) === story), group, metadata, summaries));
+  for (const [story, records] of byStory) {
+    // One name can belong to two different people in two stories, so a
+    // speaker is only ever matched against the cast of its own story.
+    const scoped = registry.characters.filter((character) => (character.story || BOOK_STORY_ID) === story);
+    resolutions.push(...await reconcileStory(scoped, records, (index) => chapterTitle(metadata, index)));
   }
   const byKey = new Map(resolutions.map((resolution) => [resolution.key, resolution]));
-  return candidates.map((candidate) => byKey.get(candidate.key)
-    ?? { key: candidate.key, speaker: candidate.speaker, resolution: 'unresolved', reason: 'The reconciliation pass did not return a decision.', evidence: '' });
+  return pending.map((record) => byKey.get(unresolvedKey(record)) ?? undecided(record, 'The reconciliation pass did not return a decision.'));
 }
 
-type RegistryCharacter = ReturnType<typeof readCharacterRegistry>['characters'][number];
+function undecided(record: UnresolvedSpeakerRecord, reason: string, evidence = ''): SpeakerResolution {
+  return { key: unresolvedKey(record), chapter: record.chapter, speaker: record.speaker, resolution: 'unresolved', reason, evidence };
+}
 
 /** One conservative pass over the unresolved speakers of a single story. */
 async function reconcileStory(
-  scoped: RegistryCharacter[],
-  candidates: UnresolvedSpeaker[],
-  metadata: BookMetadata,
-  summaries: ChapterSummaries,
+  scoped: CastCharacter[],
+  records: UnresolvedSpeakerRecord[],
+  titleOf: (chapter: number) => string,
 ): Promise<SpeakerResolution[]> {
   const characters = scoped.map((character) => ({
     name: character.name, aliases: character.aliases, chapters: character.chapters,
-    evidence: character.evidence.slice(-3),
+    evidence: character.evidence.slice(-3).map((entry) => entry.text),
   }));
   const result = await jsonCall({
     model: config.analysisModel,
     schema: ReconciliationSchema,
-    system: `You reconcile unresolved audiobook dialogue speakers. Respond with JSON: {"resolutions":[{"speaker","resolution","character?","reason","evidence"}]}.
+    system: `You reconcile unresolved audiobook dialogue speakers. Respond with JSON: {"resolutions":[{"chapter","speaker","resolution","character?","reason","evidence"}]}.
 
 Rules:
-- Use resolution="existing" only when the passage supports one exact canonical character from the supplied registry. Set character to that exact name.
-- Use resolution="new" when the speaker is clearly a distinct, durable role or character but is not in the registry. Do not invent a personal name or traits.
+- Use resolution="existing" only when the passage supports one exact canonical character from the supplied cast. Set character to that exact name.
+- Use resolution="new" when the speaker is clearly a distinct, durable role or character but is not in the cast. Do not invent a personal name or traits.
 - Use resolution="unresolved" when the text does not establish the identity. Never guess merely from gender, clothing, or voice.
 - evidence must be a short quoted or closely paraphrased fact from the supplied context; reason must explain the choice briefly.
-- Return one decision for every unresolved speaker and no others.`,
-    user: `Canonical characters (the only allowed existing choices):\n${JSON.stringify(characters)}\n\nUnresolved speakers:\n${candidates.map((candidate) => `Speaker: ${JSON.stringify(candidate.speaker)}\n${chapterContext(metadata, summaries, candidate)}`).join('\n\n---\n\n')}`,
+- Return one decision for every unresolved speaker, with its chapter number as given, and no others.`,
+    user: `Canonical characters (the only allowed existing choices):\n${JSON.stringify(characters)}\n\nUnresolved speakers:\n${records.map((record) =>
+      `Chapter ${record.chapter}: ${JSON.stringify(titleOf(record.chapter))}\nSpeaker: ${JSON.stringify(record.speaker)}\n${record.samples.map((sample) => `Dialogue: ${JSON.stringify(sample.text)}\nIn context (the line is marked ">>"):\n${sample.context}`).join('\n')}`).join('\n\n---\n\n')}`,
   });
 
-  const bySpeaker = new Map(result.resolutions.map((resolution) => [normalize(resolution.speaker), resolution]));
-  const byName = new Map(scoped.map((character) => [normalize(character.name), character]));
-  return candidates.map((candidate) => {
-    const proposal = bySpeaker.get(normalize(candidate.speaker));
-    if (!proposal) return { ...candidate, resolution: 'unresolved', reason: 'The reconciliation pass did not return a decision.', evidence: '' };
+  const proposals = new Map(result.resolutions.map((resolution) => [unresolvedKey(resolution), resolution]));
+  const byName = new Map(scoped.map((character) => [nameKey(character.name), character]));
+  return records.map((record) => {
+    const proposal = proposals.get(unresolvedKey(record));
+    if (!proposal) return undecided(record, 'The reconciliation pass did not return a decision.');
     if (proposal.resolution === 'existing') {
-      const character = proposal.character ? byName.get(normalize(proposal.character)) : undefined;
-      if (character) return { key: candidate.key, speaker: candidate.speaker, resolution: 'existing', characterId: character.id, reason: proposal.reason, evidence: proposal.evidence };
-      return { key: candidate.key, speaker: candidate.speaker, resolution: 'unresolved', reason: 'The reconciliation pass selected a character outside the current registry.', evidence: proposal.evidence };
+      const character = proposal.character ? byName.get(nameKey(proposal.character)) : undefined;
+      if (!character) return undecided(record, 'The reconciliation pass selected a character outside the current cast.', proposal.evidence);
+      return { key: unresolvedKey(record), chapter: record.chapter, speaker: record.speaker, resolution: 'existing', character: character.name, reason: proposal.reason, evidence: proposal.evidence };
     }
-    return { key: candidate.key, speaker: candidate.speaker, resolution: proposal.resolution, reason: proposal.reason, evidence: proposal.evidence };
+    return { key: unresolvedKey(record), chapter: record.chapter, speaker: record.speaker, resolution: proposal.resolution, reason: proposal.reason, evidence: proposal.evidence };
   });
 }

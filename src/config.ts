@@ -15,7 +15,13 @@ export interface OpenRouterMaxPrice {
   completion?: number;
 }
 
-export type OpenRouterReasoningEffort = 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+/**
+ * How much a text model may reason before answering. 'none' turns reasoning
+ * off, which is the default: the pipeline asks for short structured answers,
+ * and a model left to reason by default can spend twenty times the tokens of
+ * its answer. 'default' sends no setting and leaves the choice to the provider.
+ */
+export type OpenRouterReasoningEffort = 'none' | 'default' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 const llmRunConfig = new AsyncLocalStorage<LlmRunConfig>();
 
@@ -43,7 +49,8 @@ function positiveIntFromEnv(name: string, fallback: number): number {
 
 function openRouterMaxPriceFromEnv(): OpenRouterMaxPrice | undefined {
   const value = process.env.LISEN_OPENROUTER_MAX_PRICE;
-  if (value === undefined) return undefined;
+  // Empty means no cap, so a caller can lift a cap that .env sets (.env never overrides a variable already set).
+  if (value === undefined || !value.trim()) return undefined;
 
   let parsed: unknown;
   try {
@@ -76,11 +83,11 @@ function openRouterMaxPriceFromEnv(): OpenRouterMaxPrice | undefined {
 }
 
 function parseReasoningEffort(value: string, name: string): OpenRouterReasoningEffort {
-  if (['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(value)) {
+  if (['none', 'default', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(value)) {
     return value as OpenRouterReasoningEffort;
   }
   throw new Error(
-    `Invalid ${name} "${value}". Expected none, minimal, low, medium, high, xhigh, or max.`
+    `Invalid ${name} "${value}". Expected none (off), default (the provider's own), minimal, low, medium, high, xhigh, or max.`
   );
 }
 
@@ -95,40 +102,52 @@ export const config = {
     if (selected) return selected;
     return providerFromEnv('LISEN_LLM_PROVIDER', 'openai');
   },
-  /** Model for whole-book analysis (fiction detection, characters, casting). */
+  /** Model for whole-book work: the Metadata call, casting, and speaker review. */
   get analysisModel(): string {
     const selected = llmRunConfig.getStore()?.model;
     if (selected) return selected;
     return process.env.LISEN_ANALYSIS_MODEL ?? 'gpt-4.1';
   },
-  /** Model for per-chapter bulk work (summaries, cleanup, dialogue attribution). */
+  /** Model for per-chapter bulk work (cleanup edits and dialogue labels). */
   get chapterModel(): string {
     const selected = llmRunConfig.getStore()?.model;
     if (selected) return selected;
     return process.env.LISEN_CHAPTER_MODEL ?? 'gpt-4.1-mini';
   },
-  /** Model used only by Script attribution, boundary repair, and verification. */
+  /** Model used by Script's per-chunk call. */
   get scriptModel(): string {
     return llmRunConfig.getStore()?.scriptModel || process.env.LISEN_SCRIPT_MODEL || this.chapterModel;
   },
-  /** Preserve the stronger analysis-model default for Script repair and review. */
+  /** Script verification defaults to the stronger analysis model. */
   get scriptReviewModel(): string {
     return llmRunConfig.getStore()?.scriptModel || process.env.LISEN_SCRIPT_MODEL || this.analysisModel;
   },
-  /** Script-only reasoning effort; none preserves the provider's default request behavior. */
+  /** Reasoning for Script's attribution and verification calls; off unless set. */
   get scriptReasoningEffort(): OpenRouterReasoningEffort {
     const value = llmRunConfig.getStore()?.scriptReasoningEffort
       ?? process.env.LISEN_SCRIPT_REASONING_EFFORT
-      ?? (this.llmProvider === 'openrouter' ? this.openRouterReasoningEffort : 'none');
+      ?? this.openRouterReasoningEffort;
     return parseReasoningEffort(value, 'LISEN_SCRIPT_REASONING_EFFORT');
   },
-  /** Leave space for reasoning tokens as well as the copied chapter text. */
+  /** Room for a dialogue-heavy chunk's labels, plus reasoning tokens when enabled. */
   get scriptMaxCompletionTokens(): number {
-    return positiveIntFromEnv('LISEN_SCRIPT_MAX_COMPLETION_TOKENS',
-      this.scriptReasoningEffort === 'none' ? this.llmMaxCompletionTokens : Math.max(8192, this.llmMaxCompletionTokens));
+    return positiveIntFromEnv('LISEN_SCRIPT_MAX_COMPLETION_TOKENS', Math.max(8192, this.llmMaxCompletionTokens));
   },
   scriptVerificationBatchSize: 12,
-  scriptNarrationAuditBatchSize: 8,
+  /** Max characters of chapter text per Script call when the model returns labels. */
+  scriptChunkChars: 16_000,
+  /** Max characters per Script call when the model must return the text itself (unquoted dialogue). */
+  scriptUnquotedChunkChars: 6_000,
+  /** A chunk is cut further so one reply never has to label more quotes than this. */
+  scriptMaxQuotesPerChunk: 120,
+  /** Adjacent narration is joined into segments of at most this many characters. */
+  narrationMergeChars: 1500,
+  /** Words of each chapter's opening sent to Metadata. */
+  metadataOpeningWords: 150,
+  /** Words of the first body chapter sent to Metadata as a prose sample. */
+  metadataSampleWords: 1500,
+  /** Double-quote pairs per 1,000 words above which a book's dialogue is treated as quoted. */
+  quotedDialoguePairsPerThousandWords: 2,
   /** TTS model. OpenRouter model ids include the provider prefix. */
   get ttsModel(): string {
     return (
@@ -156,7 +175,7 @@ export const config = {
   get openRouterTraceFile(): string | undefined {
     return process.env.LISEN_OPENROUTER_TRACE_FILE;
   },
-  /** Reasoning budget for OpenRouter text models; off by default for structured pipeline work. */
+  /** Reasoning for every text-model call that does not set its own; off by default. */
   get openRouterReasoningEffort(): OpenRouterReasoningEffort {
     return openRouterReasoningEffortFromEnv();
   },
@@ -168,14 +187,10 @@ export const config = {
   get voiceLibraryFile(): string {
     return process.env.LISEN_VOICE_LIBRARY_FILE ?? './library/voices.json';
   },
-  /** Max characters sent to the LLM per chunk when processing chapter text. */
-  llmChunkChars: 6000,
   /** Extract splits a source chapter longer than this many words into parts. */
   maxChapterWords: 8000,
   /** Approximate size of each part when a chapter is split. */
   targetChapterWords: 5000,
-  /** Max characters of any one chapter summary sent as prompt context. */
-  promptSummaryChars: 800,
 
   /** Maximum tokens requested for a structured LLM completion. */
   get llmMaxCompletionTokens(): number {
@@ -207,8 +222,8 @@ export const config = {
   ttsConcurrency: 4,
   /** Parallel LLM requests for per-chapter work. */
   llmConcurrency: 3,
-  /** Characters ranked above this many distinct-voice slots share voices via instructions. */
-  distinctVoiceSlots: 8,
+  /** Speakers designed per Casting request; a larger story cast is split so the reply fits. */
+  castingBatchSize: 30,
   /** Audio bitrate for chapter/book AAC encoding. */
   audioBitrate: '96k',
   /** Silence inserted where the book marks a scene break ("• • •"). */
@@ -217,11 +232,25 @@ export const config = {
   },
 };
 
+/** Tunables of the Script benchmark (`npm run bench`); see benchmarks/ and README.md. */
+export const benchmarkConfig = {
+  /** Configurations run at once, each in its own child process. */
+  concurrency: 4,
+  /** Script completion cap for a run with reasoning off. A model that reasons anyway still has room. */
+  maxCompletionTokens: 16_384,
+  /** Script completion cap when reasoning is on; reasoning tokens count against it. */
+  reasoningMaxCompletionTokens: 65_536,
+  /** One response may take this long; a reasoning block on a slow model took about 100 seconds. */
+  responseTimeoutMs: 600_000,
+  /** Runs of each configuration, unless the command line asks for more. */
+  repeats: 1,
+  /** A run whose text covers less than this share of the reference's lines is ranked below complete runs. */
+  minCoverage: 0.95,
+};
+
 export const STAGES = [
   'extract',
-  'analyze',
-  'chapters',
-  'list-characters',
+  'metadata',
   'script',
   'casting',
   'voices',

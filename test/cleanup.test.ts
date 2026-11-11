@@ -1,19 +1,5 @@
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WorkDir } from '../src/state.js';
-import { applyCleanupEdits, dropEmptyParagraphs, restoreSceneBreaks } from '../src/pipeline/cleanup.js';
-import { runStage, type PipelineEvent } from '../src/pipeline/runner.js';
-import { jsonCall } from '../src/providers/llm/openai.js';
-
-vi.mock('../src/providers/llm/openai.js', () => ({ jsonCall: vi.fn() }));
-const llm = vi.mocked(jsonCall);
-const roots: string[] = [];
-afterEach(() => {
-  vi.resetAllMocks();
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
-});
+import { describe, expect, it } from 'vitest';
+import { applyCleanupEdits, applySpanEdits, dropEmptyParagraphs } from '../src/pipeline/cleanup.js';
 
 describe('applyCleanupEdits', () => {
   it('replaces every occurrence and leaves the rest of the text untouched', () => {
@@ -72,78 +58,31 @@ describe('dropEmptyParagraphs', () => {
   });
 });
 
-describe('restoreSceneBreaks', () => {
-  const raw = '# One\n\nFirst paragraph here.\n\n• • •\n\nSecond paragraph here.\n\nThird paragraph here.\n\n* * *\n\nFourth paragraph here.';
-
-  it('puts dividers back where the extracted chapter has them', () => {
-    const cleaned = '# One\n\nFirst paragraph here.\n\nSecond paragraph here.\n\nThird paragraph here.\n\nFourth paragraph here.';
-
-    expect(restoreSceneBreaks(raw, cleaned)).toEqual({ text: raw, restored: 2, missed: 0 });
+describe('applySpanEdits', () => {
+  it('applies an edit inside the span it quotes and leaves the others untouched', () => {
+    const result = applySpanEdits(['They walked 5 km', '"Only 5 km?"', 'she asked.'], [{ find: '5 km', replace: '5 kilometres' }]);
+    expect(result.texts).toEqual(['They walked 5 kilometres', '"Only 5 kilometres?"', 'she asked.']);
+    expect(result.applied).toBe(1);
+    expect(result.skipped).toEqual([]);
   });
 
-  it('anchors a divider on prose a cleanup edit has changed', () => {
-    const cleaned = '# One\n\nFirst paragraph here, that is here.\n\nSecond paragraph here.\n\nThird paragraph here.\n\nFourth paragraph here.';
-    const result = restoreSceneBreaks(raw, cleaned);
-
-    expect(result.restored).toBe(2);
-    expect(result.text).toContain('that is here.\n\n• • •\n\nSecond');
+  it('skips an edit whose quotation only exists across two spans', () => {
+    const result = applySpanEdits(['"Stop,"', 'said Tom.12'], [
+      { find: '," said', replace: ', said' },
+      { find: 'Tom.12', replace: 'Tom.' },
+    ]);
+    expect(result.texts).toEqual(['"Stop,"', 'said Tom.']);
+    expect(result.skipped).toEqual([{ find: '," said', reason: 'crosses a span boundary' }]);
   });
 
-  it('reports a divider whose surrounding paragraphs are gone instead of guessing', () => {
-    const result = restoreSceneBreaks('Alpha.\n\n• • •\n\nBeta.', 'Something else entirely.');
-
-    expect(result).toEqual({ text: 'Something else entirely.', restored: 0, missed: 1 });
+  it('counts a bare number across every span before deleting it', () => {
+    const result = applySpanEdits(['In 12 days', 'he counted 12 ships.'], [{ find: '12', replace: '' }]);
+    expect(result.texts).toEqual(['In 12 days', 'he counted 12 ships.']);
+    expect(result.skipped[0].reason).toContain('more than once');
   });
 
-  it('leaves text that already carries its dividers untouched', () => {
-    expect(restoreSceneBreaks(raw, raw)).toEqual({ text: raw, restored: 0, missed: 0 });
-  });
-
-  it('keeps a divider that opens the chapter', () => {
-    const result = restoreSceneBreaks('• • •\n\nFirst paragraph here.', 'First paragraph here.');
-
-    expect(result.text).toBe('• • •\n\nFirst paragraph here.');
-  });
-});
-
-describe('Chapters cleanup', () => {
-  it('writes the source text with only the listed edits applied, and reports rejected ones', async () => {
-    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lisen-cleanup-'));
-    roots.push(root);
-    const sourcePath = path.join(root, 'book.epub');
-    fs.writeFileSync(sourcePath, 'offline fixture');
-    const work = new WorkDir(sourcePath, root);
-    work.writeJson('metadata.json', { title: 'Essay', author: 'Author', chapters: [{ index: 0, title: 'One', file: 'chapters/0.md', words: 20 }] });
-    work.writeJson('analysis.json', {
-      isFiction: false, summary: 'Overview.', characters: [],
-      author: { name: 'Author', sex: 'unknown', age: 'unknown', country: 'unknown' },
-      chapters: [{ index: 0, narrate: true }],
-    });
-    work.dir('chapters');
-    fs.writeFileSync(work.path('chapters/0.md'), '# One\n\nShe didn’t walk 5 km, e.g. to work.3\n\n* * *\n\nThe end.');
-    work.markDone('extract');
-    work.markDone('analyze');
-    llm.mockResolvedValueOnce({
-      edits: [
-        { find: '5 km', replace: '5 kilometres' },
-        { find: 'e.g.', replace: 'for example' },
-        { find: 'work.3', replace: 'work.' },
-        { find: 'She did not walk', replace: 'She never walked' },
-      ],
-      partialSummary: 'A walk.',
-      characters: [],
-    });
-    const events: PipelineEvent[] = [];
-
-    await runStage({ sourcePath, workRoot: root, stage: 'chapters', onEvent: (event) => events.push(event) });
-
-    expect(fs.readFileSync(work.path('chapters-clean/00.md'), 'utf8'))
-      .toBe('# One\n\nShe didn’t walk 5 kilometres, for example to work.\n\n* * *\n\nThe end.');
-    const warning = events.find((event) => event.type === 'warning')?.message ?? '';
-    expect(warning).toContain('Chapter 1, block 1: skipped 1 cleanup edit(s)');
-    expect(warning).toContain('She did not walk');
-    const request = llm.mock.calls[0][0] as { system: string };
-    expect(request.system).toContain('"edits"');
-    expect(request.system).not.toContain('cleanedText');
+  it('keeps the size guards', () => {
+    const long = 'word '.repeat(40).trim();
+    expect(applySpanEdits([long], [{ find: long, replace: 'gone' }]).skipped[0].reason).toBe('would remove too much text');
   });
 });

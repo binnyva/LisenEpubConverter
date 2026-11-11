@@ -1,14 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { STAGES, withLlmRunConfig, type OpenRouterReasoningEffort, type ProviderId, type Stage } from '../config.js';
-import { WorkDir, openWorkDir } from '../state.js';
-import type { Analysis, BookMetadata, ChapterScript, Stories } from '../types.js';
-import { runAnalyze } from './analyze.js';
+import { OUTDATED_WORK_FOLDER_MESSAGE, WorkDir, openWorkDir } from '../state.js';
+import type { BookMetadata, Stories } from '../types.js';
+import { AUDIO_DIR, CHAPTERS_DIR, CHARACTERS_FILE, METADATA_FILE, SCRIPTS_DIR, findChapterFile, listChapterFiles, removeChapterFiles } from '../layout.js';
 import { runAssemble } from './assemble.js';
 import { runCasting } from './casting.js';
-import { runChapters } from './chapters.js';
-import { CHARACTER_REGISTRY_FILE, characterChapterFile, characterScopeHash, characterScopeHashes, legacyCharacterRegistryHash, readCharacterRegistry, runListCharacters } from './list-characters.js';
-import { STORIES_FILE, buildStories, chaptersForStoryNumbers, readStories, storyIdFor, validateStories, writeStories } from './stories.js';
+import { runMetadata } from './metadata.js';
+import { STORIES_FILE, buildStories, chaptersForStoryNumbers, narratableChapters, readStories, validateStories, writeStories } from './stories.js';
 import { runExtract } from './extract.js';
 import { runScript } from './script.js';
 import { runSynth } from './synth.js';
@@ -16,16 +15,19 @@ import { runVoices } from './voices.js';
 import type { VoiceTarget } from '../voices/library.js';
 import { withWarningReporter } from '../util/warnings.js';
 import { withStageProgress, type ChapterProgress, type ActivityProgress } from '../util/progress.js';
-import { throwIfTaskCancelled, withTaskCancellation } from '../util/cancellation.js';
+import { TaskCancelledError, throwIfTaskCancelled, withTaskCancellation } from '../util/cancellation.js';
+import { collectUsage, saveUsage, usageSummary, type StageUsage } from '../util/usage.js';
 import { clearCheckpoints } from './checkpoint.js';
 import { sourceIsAvailable, type SourceMetadataOverrides } from '../source/read.js';
 
-export type ChapterStage = 'chapters' | 'script' | 'synth';
+export type ChapterStage = 'script' | 'synth';
 
 export interface PipelineEvent {
-  type: 'started' | 'completed' | 'skipped' | 'warning' | 'progress';
+  type: 'started' | 'completed' | 'skipped' | 'warning' | 'progress' | 'usage';
   stage: Stage;
   message: string;
+  /** With type 'usage': what the stage cost, as saved to usage.json. */
+  usage?: StageUsage;
   progress?: ChapterProgress | ActivityProgress;
   heartbeat?: boolean;
 }
@@ -58,6 +60,8 @@ export interface RunStageOptions {
   rebuild?: boolean;
   /** Abort an in-progress local UI task. */
   signal?: AbortSignal;
+  /** Groups the usage records of the stages run together; generated when omitted. */
+  runId?: string;
   onEvent?: (event: PipelineEvent) => void;
 }
 
@@ -67,6 +71,8 @@ export interface RunStageResult {
   skipped: boolean;
   output?: string;
   chapterIndexes?: number[];
+  /** Calls, tokens and wall time of this stage; absent when it was skipped. */
+  usage?: StageUsage;
 }
 
 export interface DiscoveredBook {
@@ -74,9 +80,11 @@ export interface DiscoveredBook {
   sourcePath: string;
   sourceAvailable: boolean;
   completed: Partial<Record<Stage, string>>;
+  /** Made by an earlier pipeline; it must be rebuilt from Extract. */
+  outdated: boolean;
 }
 
-const CHAPTER_STAGES = new Set<Stage>(['chapters', 'script', 'synth']);
+const CHAPTER_STAGES = new Set<Stage>(['script', 'synth']);
 
 /** Run exactly one stage. The CLI and local UI both use this instead of duplicating orchestration. */
 export async function runStage(options: RunStageOptions): Promise<RunStageResult> {
@@ -86,10 +94,53 @@ export async function runStage(options: RunStageOptions): Promise<RunStageResult
   }, () => withStageProgress((progress, message, heartbeat) => {
     if (options.onEvent) options.onEvent({ type: 'progress', stage: options.stage, progress, message, heartbeat });
     else console.log(`[${options.stage}] ${message}`);
-  }, () => executeStage(options)))));
+  }, () => measureStage(options)))));
 }
 
-async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
+/**
+ * Run the stage and account for it: calls, tokens and wall time are printed
+ * when it finishes, sent as a 'usage' event, and appended to usage.json. A
+ * failed or cancelled stage is recorded too, because it was paid for; a
+ * skipped stage, or one refused before it started, is not.
+ */
+async function measureStage(options: RunStageOptions): Promise<RunStageResult> {
+  const started = Date.now();
+  const tracking: StageTracking = {};
+  return collectUsage(async (collected) => {
+    const record = (outcome: StageUsage['outcome']): StageUsage | undefined => {
+      if (!tracking.work) return undefined;
+      const usage: StageUsage = {
+        runId: options.runId ?? `${options.stage}-${new Date(started).toISOString()}`,
+        stage: options.stage,
+        startedAt: new Date(started).toISOString(),
+        wallMs: Date.now() - started,
+        outcome,
+        ...(tracking.chapters ? { chapters: tracking.chapters } : {}),
+        ...collected(),
+      };
+      saveUsage(tracking.work.root, usage);
+      const message = `${options.stage} usage: ${usageSummary(usage)}`;
+      if (options.onEvent) options.onEvent({ type: 'usage', stage: options.stage, message, usage });
+      else console.log(`[${options.stage}] ${message}`);
+      return usage;
+    };
+    try {
+      const result = await executeStage(options, tracking);
+      return result.skipped ? result : { ...result, usage: record('completed') };
+    } catch (err) {
+      record(err instanceof TaskCancelledError ? 'cancelled' : 'failed');
+      throw err;
+    }
+  });
+}
+
+/** Set by executeStage once the stage has actually begun. */
+interface StageTracking {
+  work?: WorkDir;
+  chapters?: number[];
+}
+
+async function executeStage(options: RunStageOptions, tracking: StageTracking = {}): Promise<RunStageResult> {
   const { workRoot, outDir, stage, rebuild, rerun, onEvent } = options;
   const sourcePath = options.sourcePath ?? options.epubPath;
   throwIfTaskCancelled();
@@ -98,12 +149,14 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
   if (!sourceIsAvailable(sourcePath)) throw new Error(`Source file not found: ${sourcePath}`);
 
   const work = await openWorkDir(sourcePath, workRoot, options.metadataOverrides);
+  if (work.isOutdated()) {
+    // Nothing in an earlier pipeline's folder is read, migrated or removed.
+    if (!(stage === 'extract' && rebuild)) throw new Error(OUTDATED_WORK_FOLDER_MESSAGE);
+    work.adoptCurrentLayout();
+  }
   if (options.metadataOverrides) work.setMetadataOverrides(options.metadataOverrides);
   if (options.collection !== undefined) applyCollectionSetting(work, options.collection);
   const chapterIndexes = normalizeChapterIndexes(selectedChapters(work, options));
-  if (chapterIndexes && stage === 'list-characters') {
-    throw new Error('List Characters uses all narratable chapters; omit --chapters.');
-  }
   if (rebuild && rerun) throw new Error('Choose either rerun or rebuild, not both.');
   if (rebuild && chapterIndexes) {
     throw new Error('Chapter-specific rebuild is not supported yet. Rebuild the full stage, or run selected chapters to resume them.');
@@ -125,10 +178,6 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
   }
 
   const selected = await validatePrerequisites(work, stage, chapterIndexes);
-  if (stage === 'chapters' && selected?.some((index) => !fs.existsSync(work.path(characterChapterFile(index))))) {
-    // Legacy chapter output needs discovery only; keep existing cleaned text and audio cache.
-    work.invalidateFrom(work.isDone('chapters') ? 'chapters' : 'list-characters');
-  }
   if (stage === 'synth' && work.isDone('synth') && work.synthesisInputsChanged()) {
     work.invalidateFrom('synth');
     clearArtifactsFrom(work, 'synth');
@@ -139,6 +188,8 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
   }
 
   onEvent?.({ type: 'started', stage, message: `Running ${stage}…` });
+  tracking.work = work;
+  tracking.chapters = chapterIndexes;
   let output: string | undefined;
   switch (stage) {
     case 'extract':
@@ -146,36 +197,14 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
       work.acceptCurrentSource();
       work.markDone(stage);
       break;
-    case 'analyze': {
+    case 'metadata': {
       const previousStories = readFileIfPresent(work.path(STORIES_FILE));
-      await runAnalyze(work);
+      await runMetadata(work);
       // Regrouped stories change every character scope below this stage.
       if (previousStories !== undefined && previousStories !== readFileIfPresent(work.path(STORIES_FILE))) {
-        work.invalidateFrom('list-characters');
-        clearArtifactsFrom(work, 'list-characters');
+        work.invalidateFrom('script');
+        clearArtifactsFrom(work, 'script');
       }
-      work.markDone(stage);
-      break;
-    }
-    case 'chapters':
-      await runChapters(work, selected);
-      markChapterStage(work, stage, selected);
-      break;
-    case 'list-characters': {
-      const stories = readStories(work);
-      let before: Map<string, string> | undefined;
-      if (fs.existsSync(work.path(CHARACTER_REGISTRY_FILE))) {
-        try {
-          before = characterScopeHashes(readCharacterRegistry(work), stories);
-        } catch {
-          // An unreadable registry cannot be compared, and this stage is the
-          // one that rebuilds it. Treat every story as changed instead of
-          // refusing to run.
-          before = new Map();
-        }
-      }
-      const registry = runListCharacters(work);
-      invalidateChangedStories(work, before, characterScopeHashes(registry, stories), stories);
       work.markDone(stage);
       break;
     }
@@ -212,9 +241,7 @@ async function executeStage(options: RunStageOptions): Promise<RunStageResult> {
 function selectedChapters(work: WorkDir, options: RunStageOptions): number[] | undefined {
   if (!options.storyIndexes?.length) return options.chapterIndexes;
   if (options.chapterIndexes?.length) throw new Error('Select either chapters or stories, not both.');
-  if (!fs.existsSync(work.path('metadata.json')) || !fs.existsSync(work.path('analysis.json'))) {
-    throw new Error('Run analyze before selecting stories.');
-  }
+  if (!profiledMetadata(work)) throw new Error('Run metadata before selecting stories.');
   return chaptersForStoryNumbers(readStories(work), options.storyIndexes);
 }
 
@@ -222,68 +249,42 @@ function readFileIfPresent(file: string): string | undefined {
   return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : undefined;
 }
 
+/** metadata.json, once the Metadata stage has profiled the book. */
+function profiledMetadata(work: WorkDir): BookMetadata | undefined {
+  if (!fs.existsSync(work.path(METADATA_FILE))) return undefined;
+  const metadata = work.readJson<BookMetadata>(METADATA_FILE);
+  return metadata.profile ? metadata : undefined;
+}
+
 /**
  * Record an explicit collection choice and regroup the stories. The grouping
- * is derived, so Analyze does not have to run again; the artifacts that depend
- * on character scopes are cleared, keeping cleaned text and paid MP3s.
+ * is derived, so Metadata does not have to run again; the artifacts that depend
+ * on character scopes are cleared, keeping paid MP3s.
  */
 function applyCollectionSetting(work: WorkDir, collection: boolean): void {
   if (!work.setCollection(collection)) return;
-  if (!fs.existsSync(work.path('metadata.json')) || !fs.existsSync(work.path('analysis.json'))) return;
-  saveStoryGrouping(work, buildStories(collection, work.readJson<BookMetadata>('metadata.json'), work.readJson<Analysis>('analysis.json')));
+  const metadata = profiledMetadata(work);
+  if (!metadata) return;
+  saveStoryGrouping(work, buildStories(collection, metadata));
 }
 
 /**
  * Save a grouping and the collection choice it implies, then clear what
- * depends on character scopes. Cleaned text, chapter observations and the paid
- * MP3 cache are retained. Returns true when the grouping actually changed.
+ * depends on character scopes: the cast, scripts, casting, bindings and
+ * encoded chapters. The paid MP3 cache is retained. Returns true when the
+ * grouping actually changed.
  */
 export function saveStoryGrouping(work: WorkDir, next: Stories): boolean {
-  validateStories(next, work.readJson<BookMetadata>('metadata.json'), work.readJson<Analysis>('analysis.json'));
+  const metadata = profiledMetadata(work);
+  if (!metadata) throw new Error('Run metadata before grouping stories.');
+  validateStories(next, metadata);
   work.setCollection(next.collection);
   const before = readFileIfPresent(work.path(STORIES_FILE));
   writeStories(work, next);
   if (before === readFileIfPresent(work.path(STORIES_FILE))) return false;
-  work.invalidateFrom('list-characters');
-  clearArtifactsFrom(work, 'list-characters');
+  work.invalidateFrom('script');
+  clearArtifactsFrom(work, 'script');
   return true;
-}
-
-/**
- * Invalidate only the stories whose cast actually changed. One corrected
- * character in a 25-story collection must not re-attribute, and then
- * re-synthesize, every other story.
- */
-function invalidateChangedStories(
-  work: WorkDir,
-  before: Map<string, string> | undefined,
-  after: Map<string, string>,
-  stories: Stories
-): void {
-  if (!before) return;
-  const sameScopes = before.size === after.size && [...after.keys()].every((id) => before.has(id));
-  const changed = [...after].filter(([id, hash]) => before.get(id) !== hash).map(([id]) => id);
-  if (sameScopes && !changed.length) return;
-  if (!sameScopes) {
-    // The grouping moved, so no script can be trusted to use the right scope.
-    work.invalidateFrom('script');
-    clearArtifactsFrom(work, 'synth');
-    return;
-  }
-  const affected = new Set(stories.stories.filter((story) => changed.includes(story.id)).flatMap((story) => story.chapters));
-  const all = narratableChapterIndexes(work);
-  for (const index of affected) {
-    const name = String(index).padStart(2, '0');
-    // Old encoded chapters must not survive a change of speaker attribution.
-    // Scripts are left in place; their scope hash no longer matches, so Script
-    // rewrites them, and the paid MP3 cache is untouched either way.
-    fs.rmSync(work.path(`audio/${name}.m4a`), { force: true });
-    fs.rmSync(work.path(`audio/${name}-segments.json`), { force: true });
-  }
-  const unaffected = all.filter((index) => !affected.has(index));
-  work.retainChaptersDone('script', unaffected, all);
-  work.retainChaptersDone('synth', unaffected, all);
-  for (const stage of ['casting', 'voices', 'assemble'] as const) work.invalidateStage(stage);
 }
 
 export function discoverBooks(workRoot: string): DiscoveredBook[] {
@@ -299,6 +300,7 @@ export function discoverBooks(workRoot: string): DiscoveredBook[] {
         const state = JSON.parse(fs.readFileSync(statePath, 'utf8')) as {
           source?: string;
           epub?: string;
+          version?: number;
           completed?: Partial<Record<Stage, string>>;
         };
         const sourcePath = state.source ?? state.epub;
@@ -307,7 +309,8 @@ export function discoverBooks(workRoot: string): DiscoveredBook[] {
           root,
           sourcePath,
           sourceAvailable: sourceIsAvailable(sourcePath),
-          completed: state.completed ?? {},
+          completed: state.version === 3 ? state.completed ?? {} : {},
+          outdated: state.version !== 3,
         }];
       } catch {
         return [];
@@ -315,116 +318,49 @@ export function discoverBooks(workRoot: string): DiscoveredBook[] {
     });
 }
 
-/**
- * Older work folders can contain complete artifacts but an empty manifest after
- * an interrupted run or the pre-UI source-relink behavior. Recover only when
- * the current source is known to match; a changed source must be rebuilt instead.
- */
-export function recoverStageStateFromArtifacts(work: WorkDir): boolean {
-  if (work.sourceChanged() || Object.keys(work.snapshot().completed).length > 0) return false;
-  if (!fs.existsSync(work.path('metadata.json'))) return false;
-
-  let changed = false;
-  work.markDone('extract');
-  changed = true;
-  if (!fs.existsSync(work.path('analysis.json'))) return changed;
-  work.markDone('analyze');
-
-  const narratable = narratableChapterIndexes(work);
-  const summaries = fs.existsSync(work.path('chapter-summaries.json'))
-    ? work.readJson<Record<string, string>>('chapter-summaries.json')
-    : {};
-  const hasCleanOutput = narratable.every((index) =>
-    fs.existsSync(work.path(`chapters-clean/${String(index).padStart(2, '0')}.md`)) && summaries[String(index)] !== undefined &&
-    fs.existsSync(work.path(characterChapterFile(index)))
-  );
-  if (!hasCleanOutput) return changed;
-  work.markChaptersDone('chapters', narratable, narratable);
-
-  if (!fs.existsSync(work.path(CHARACTER_REGISTRY_FILE))) return changed;
-  work.markDone('list-characters');
-
-  const registry = readCharacterRegistry(work);
-  const stories = readStories(work);
-  const legacyHash = legacyCharacterRegistryHash(registry);
-  const hasScripts = narratable.every((index) => {
-    const file = `script/${String(index).padStart(2, '0')}.json`;
-    if (!fs.existsSync(work.path(file))) return false;
-    const script = work.readJson<ChapterScript>(file);
-    return script.characterScopeHash !== undefined
-      ? script.characterScopeHash === characterScopeHash(registry, storyIdFor(stories, index))
-      : script.characterRegistryHash === legacyHash;
-  });
-  if (!hasScripts) return changed;
-  work.markChaptersDone('script', narratable, narratable);
-
-  if (!fs.existsSync(work.path('casting.json'))) return changed;
-  work.markDone('casting');
-
-  if (!fs.existsSync(work.path('voice-bindings.json'))) return changed;
-  work.markDone('voices');
-
-  const hasAudio = narratable.every((index) => fs.existsSync(work.path(`audio/${String(index).padStart(2, '0')}-segments.json`)));
-  if (hasAudio) work.markChaptersDone('synth', narratable, narratable);
-  return changed;
+/** Remove Metadata's part of metadata.json, leaving what Extract wrote. */
+function clearProfile(work: WorkDir): void {
+  if (!fs.existsSync(work.path(METADATA_FILE))) return;
+  const metadata = work.readJson<BookMetadata>(METADATA_FILE);
+  if (!metadata.profile) return;
+  delete metadata.profile;
+  work.writeJson(METADATA_FILE, metadata);
 }
 
-/** Remove derived output only for an explicit rebuild; audio cache is intentionally retained. */
+/** Remove derived output only for an explicit rebuild; the audio cache is intentionally retained. */
 export function clearArtifactsFrom(work: WorkDir, stage: Stage): void {
+  const fromScript = [CHARACTERS_FILE, SCRIPTS_DIR, 'casting.json', 'voice-bindings.json', AUDIO_DIR];
   const files: Partial<Record<Stage, string[]>> = {
-    extract: ['chapters', 'metadata.json', 'analysis.json', 'stories.json', 'chapters-clean', 'chapter-summaries.json', 'chapter-characters', 'characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
-    analyze: ['analysis.json', 'stories.json', 'chapters-clean', 'chapter-summaries.json', 'chapter-characters', 'characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
-    chapters: ['chapters-clean', 'chapter-summaries.json', 'chapter-characters', 'characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
-    'list-characters': ['characters.json', 'character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
-    script: ['character-candidates', 'script', 'casting.json', 'voice-bindings.json', 'audio'],
-    casting: ['casting.json', 'voice-bindings.json', 'audio'],
-    voices: ['voice-bindings.json', 'audio'],
-    synth: ['audio'],
+    extract: [CHAPTERS_DIR, METADATA_FILE, STORIES_FILE, ...fromScript],
+    metadata: [STORIES_FILE, ...fromScript],
+    script: fromScript,
+    casting: ['casting.json', 'voice-bindings.json', AUDIO_DIR],
+    voices: ['voice-bindings.json', AUDIO_DIR],
+    synth: [AUDIO_DIR],
   };
+  if (stage === 'metadata') clearProfile(work);
   for (const rel of files[stage] ?? []) fs.rmSync(work.path(rel), { recursive: true, force: true });
   // Partial chapter progress belongs to the output being rebuilt.
-  const order = STAGES.indexOf(stage);
-  if (order <= STAGES.indexOf('chapters')) clearCheckpoints(work, 'chapters');
-  if (order <= STAGES.indexOf('script')) clearCheckpoints(work, 'script');
+  if (STAGES.indexOf(stage) <= STAGES.indexOf('script')) clearCheckpoints(work, 'script');
 }
 
 /** Clear only the output that prevents a requested stage from actually executing. */
 function clearStageOutputForRerun(work: WorkDir, stage: Stage, indexes?: number[]): void {
-  // An explicit rerun asks for fresh model output, not a resumed attempt.
-  if (stage === 'chapters' || stage === 'script') clearCheckpoints(work, stage, indexes);
-  if (stage === 'chapters') {
-    if (!indexes) {
-      fs.rmSync(work.path('chapters-clean'), { recursive: true, force: true });
-      fs.rmSync(work.path('chapter-summaries.json'), { force: true });
-      fs.rmSync(work.path('chapter-characters'), { recursive: true, force: true });
-      return;
-    }
-    const summaries = fs.existsSync(work.path('chapter-summaries.json'))
-      ? work.readJson<Record<string, string>>('chapter-summaries.json')
-      : {};
-    for (const index of indexes) {
-      fs.rmSync(work.path(`chapters-clean/${String(index).padStart(2, '0')}.md`), { force: true });
-      fs.rmSync(work.path(characterChapterFile(index)), { force: true });
-      delete summaries[String(index)];
-    }
-    work.writeJson('chapter-summaries.json', summaries);
-    return;
-  }
   if (stage === 'script') {
+    // An explicit rerun asks for fresh model output, not a resumed attempt.
+    clearCheckpoints(work, 'script', indexes);
     if (!indexes) {
-      fs.rmSync(work.path('script'), { recursive: true, force: true });
+      // A whole-stage rerun rediscovers the cast along with the scripts.
+      fs.rmSync(work.path(SCRIPTS_DIR), { recursive: true, force: true });
+      fs.rmSync(work.path(CHARACTERS_FILE), { force: true });
       return;
     }
-    for (const index of indexes) fs.rmSync(work.path(`script/${String(index).padStart(2, '0')}.json`), { force: true });
+    for (const index of indexes) removeChapterFiles(work.root, SCRIPTS_DIR, index, '.json');
     return;
   }
   if (stage === 'synth') {
-    const audio = work.path('audio');
-    if (!fs.existsSync(audio)) return;
-    const files = fs.readdirSync(audio).filter((file) => file.endsWith('.m4a'));
-    for (const file of files) {
-      const index = Number.parseInt(file, 10);
-      if (!indexes || indexes.includes(index)) fs.rmSync(path.join(audio, file), { force: true });
+    for (const { index, file } of listChapterFiles(work.root, AUDIO_DIR, '.m4a')) {
+      if (!indexes || indexes.includes(index)) fs.rmSync(work.path(file), { force: true });
     }
   }
 }
@@ -447,18 +383,11 @@ async function validatePrerequisites(
     if (!work.isDone(prerequisite)) throw new Error(`Run ${prerequisite} before ${stage}.`);
   };
   switch (stage) {
-    case 'analyze': requireDone('extract'); break;
-    case 'chapters': requireDone('analyze'); break;
-    case 'list-characters': requireDone('chapters'); break;
-    case 'script':
-      requireDone('analyze');
-      requireDone('list-characters');
-      if (!requested) requireDone('chapters');
-      break;
+    case 'metadata': requireDone('extract'); break;
+    case 'script': requireDone('metadata'); break;
     case 'casting':
-      requireDone('analyze');
-      requireDone('list-characters');
-      if (!fs.existsSync(work.path('script'))) throw new Error('Run script for at least one chapter before casting.');
+      requireDone('metadata');
+      if (!listChapterFiles(work.root, SCRIPTS_DIR, '.json').length) throw new Error('Run script for at least one chapter before casting.');
       break;
     case 'voices':
       if (!fs.existsSync(work.path('casting.json'))) throw new Error('Run casting before voices.');
@@ -478,24 +407,14 @@ async function validatePrerequisites(
   if (selected.some((index) => !available.includes(index))) {
     throw new Error(`One or more selected chapters are not narratable chapters.`);
   }
-  if (stage === 'script') requireFiles(work, selected, 'chapters-clean', '.md', 'Run chapters for the selected chapter first.');
-  if (stage === 'synth') requireFiles(work, selected, 'script', '.json', 'Run script for the selected chapter first.');
+  if (stage === 'synth' && selected.some((index) => !findChapterFile(work.root, SCRIPTS_DIR, index, '.json'))) {
+    throw new Error('Run script for the selected chapter first.');
+  }
   return selected;
 }
 
-function requireFiles(work: WorkDir, indexes: number[], dir: string, extension: string, message: string): void {
-  for (const index of indexes) {
-    const file = `${dir}/${String(index).padStart(2, '0')}${extension}`;
-    if (!fs.existsSync(work.path(file))) throw new Error(message);
-  }
-}
-
 function narratableChapterIndexes(work: WorkDir): number[] {
-  const metadata = work.readJson<BookMetadata>('metadata.json');
-  const analysis = work.readJson<Analysis>('analysis.json');
-  return metadata.chapters
-    .filter((chapter) => analysis.chapters.find((plan) => plan.index === chapter.index)?.narrate)
-    .map((chapter) => chapter.index);
+  return narratableChapters(work.readJson<BookMetadata>(METADATA_FILE));
 }
 
 function markChapterStage(work: WorkDir, stage: ChapterStage, indexes?: number[]): void {
@@ -504,21 +423,11 @@ function markChapterStage(work: WorkDir, stage: ChapterStage, indexes?: number[]
     work.markDone(stage);
     return;
   }
-  if (stage === 'chapters') {
-    // A selected rerun replaces only that chapter's observations. Retained
-    // complete chapters still count toward the whole-book registry prerequisite.
-    const summaries = work.readJson<Record<string, string>>('chapter-summaries.json');
-    const complete = all.filter((index) => summaries[String(index)] !== undefined &&
-      fs.existsSync(work.path(`chapters-clean/${String(index).padStart(2, '0')}.md`)) &&
-      fs.existsSync(work.path(characterChapterFile(index))));
-    work.markChaptersDone(stage, complete, all);
-    return;
-  }
   if (stage === 'script') {
     // A run can stop at the first unresolved speaker. When that speaker is
     // resolved, earlier script files remain valid and let the next selected
     // run continue from the failed chapter rather than starting over.
-    const complete = all.filter((index) => fs.existsSync(work.path(`script/${String(index).padStart(2, '0')}.json`)));
+    const complete = all.filter((index) => findChapterFile(work.root, SCRIPTS_DIR, index, '.json'));
     work.markChaptersDone(stage, complete, all);
     return;
   }

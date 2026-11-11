@@ -1,15 +1,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { z } from 'zod';
 import type { WorkDir } from '../state.js';
 import { BOOK_STORY_ID, CastingSchema, ChapterScriptSchema, VoiceBindingsSchema, type BookMetadata, type CastSpeaker, type Casting, type VoiceBinding, type VoiceBindings } from '../types.js';
 import { config } from '../config.js';
-import { readCharacterRegistry } from './list-characters.js';
+import { readCharacterRegistry } from './cast.js';
+import { METADATA_FILE, SCRIPTS_DIR, listChapterFiles } from '../layout.js';
 import { readStories } from './stories.js';
 import { defaultVoiceTarget, loadVoiceLibrary, modelId, type LibraryVoice, type VoiceTarget } from '../voices/library.js';
 import { reportProgress } from '../util/progress.js';
 
-/** Stage 7: apply one compatible library model to a provider-neutral cast. */
+/** Stage 5: apply one compatible library model to a provider-neutral cast. */
 export function runVoices(work: WorkDir, target = defaultVoiceTarget(), libraryFile = config.voiceLibraryFile): VoiceBindings {
   reportProgress({ activity: 'Loading voice catalogue and validating scripted speakers' });
   const library = loadVoiceLibrary(libraryFile);
@@ -21,10 +21,10 @@ export function runVoices(work: WorkDir, target = defaultVoiceTarget(), libraryF
   const casting = readCasting(work);
   validateScriptSpeakers(work, casting);
   // Casting can specify a character's spoken language, but most profiles leave
-  // it unknown. In that case the EPUB language is the safe default: an
+  // it unknown. In that case the source language is the safe default: an
   // automatic binding must not select a voice intended for another language.
-  const bookLanguage = fs.existsSync(work.path('metadata.json'))
-    ? work.readJson<BookMetadata>('metadata.json').language
+  const bookLanguage = fs.existsSync(work.path(METADATA_FILE))
+    ? work.readJson<BookMetadata>(METADATA_FILE).language
     : undefined;
 
   const existing = fs.existsSync(work.path('voice-bindings.json'))
@@ -96,8 +96,9 @@ export function validateVoiceBindings(work: WorkDir): VoiceBindings {
 function speakerGroups(work: WorkDir, names: string[]): string[][] {
   let storyOfName: Map<string, string> | undefined;
   try {
-    if (readStories(work).collection) {
-      storyOfName = new Map(readCharacterRegistry(work).characters.map((character) => [character.name, character.story || BOOK_STORY_ID]));
+    const stories = readStories(work);
+    if (stories.collection) {
+      storyOfName = new Map(readCharacterRegistry(work, stories).characters.map((character) => [character.name, character.story || BOOK_STORY_ID]));
     }
   } catch {
     // Voices can be applied to a cast that has no registry beside it.
@@ -112,10 +113,9 @@ function speakerGroups(work: WorkDir, names: string[]): string[][] {
 }
 
 function validateScriptSpeakers(work: WorkDir, casting: Casting): void {
-  if (!fs.existsSync(work.path('script'))) return;
   const missing = new Set<string>();
-  for (const file of fs.readdirSync(work.path('script')).filter((file) => file.endsWith('.json'))) {
-    const script = ChapterScriptSchema.parse(work.readJson(`script/${file}`));
+  for (const { file } of listChapterFiles(work.root, SCRIPTS_DIR, '.json')) {
+    const script = ChapterScriptSchema.parse(work.readJson(file));
     for (const segment of script.segments) {
       if (segment.speaker !== 'narrator' && !Object.hasOwn(casting.characters, segment.speaker)) missing.add(segment.speaker);
     }
@@ -123,37 +123,10 @@ function validateScriptSpeakers(work: WorkDir, casting: Casting): void {
   if (missing.size) throw new Error(`Add missing scripted speakers to casting.json before applying voices: ${[...missing].join(', ')}.`);
 }
 
-const LegacySpeakerSchema = z.object({ voiceId: z.string(), instructions: z.string().default('') });
-const LegacyCastingSchema = z.object({
-  narrator: LegacySpeakerSchema,
-  characters: z.record(z.string(), LegacySpeakerSchema),
-});
-
-/**
- * Old work folders stored model-specific IDs in casting.json without recording
- * the model. Preserve their instructions, keep a backup, and intentionally
- * leave the new profile unknown so applying the selected library is explicit.
- */
 function readCasting(work: WorkDir): Casting {
-  const raw = work.readJson<unknown>('casting.json');
-  const modern = CastingSchema.safeParse(raw);
-  if (modern.success) return modern.data;
-  const legacy = LegacyCastingSchema.safeParse(raw);
-  if (!legacy.success) throw new Error('casting.json does not match the current or legacy casting format. Re-run the casting stage.');
-  const backup = work.path('casting.legacy.json');
-  if (!fs.existsSync(backup)) fs.copyFileSync(work.path('casting.json'), backup);
-  const speaker = (entry: z.infer<typeof LegacySpeakerSchema>): CastSpeaker => ({
-    voiceProfile: { presentation: 'unknown', age: 'unknown', tone: [], language: 'unknown', accent: 'unspecified' },
-    instructions: entry.instructions,
-  });
-  const casting: Casting = {
-    version: 2,
-    narrator: speaker(legacy.data.narrator),
-    characters: Object.fromEntries(Object.entries(legacy.data.characters).map(([name, entry]) => [name, speaker(entry)])),
-  };
-  work.writeJson('casting.json', casting);
-  console.warn(`  Migrated legacy casting.json; original saved as ${backup}. Run voices to choose a recorded provider/model target.`);
-  return casting;
+  const casting = CastingSchema.safeParse(work.readJson<unknown>('casting.json'));
+  if (!casting.success) throw new Error('casting.json does not match the casting format. Re-run the casting stage.');
+  return casting.data;
 }
 
 function chooseBinding(

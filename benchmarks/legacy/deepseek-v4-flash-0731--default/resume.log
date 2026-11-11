@@ -1,0 +1,56 @@
+
+> lisen-epub-convertor@0.1.0 dev
+> tsx src/cli.ts convert https://users.ece.cmu.edu/~gamvrosi/thelastq.html --dry-run --work ./work-dryrun
+
+Work directory: /Users/binnyva/Data/Projects/Personal/Lisen/EpubConvertor/work-dryrun/the-last-question
+[extract] extract is already complete.
+[metadata] metadata is already complete.
+[script] Running script…
+[script] Chapter 0: "The Last Question" — Preparing script · 0/1 chapters complete · 0s elapsed
+[script] Chapter 0: "The Last Question" — Text processed. Saving script · 0/1 chapters complete · 0s elapsed
+[script] Chapter 0: "The Last Question" — Chapter complete · 1/1 chapters complete · 0s elapsed
+[script] script complete.
+[script] script usage: no model calls · 0s
+[casting] Running casting…
+[casting] Reading the cast and counting scripted speakers · 0s elapsed
+[casting] Designing the narrator voice profile — waiting for model response · 0/2 casts designed (0%) · 0s elapsed
+[casting] Designing 13 character voice profile(s) for "The Last Question" — waiting for model response · 1/2 casts designed (50%) · 4s elapsed
+[casting] Designing 13 character voice profile(s) for "The Last Question" — waiting for model response · 1/2 casts designed (50%) · 10s elapsed
+[casting] Designing 13 character voice profile(s) for "The Last Question" — waiting for model response · 1/2 casts designed (50%) · 20s elapsed
+[casting] Designing 13 character voice profile(s) for "The Last Question" — waiting for model response · 1/2 casts designed (50%) · 30s elapsed
+[casting] Designing 13 character voice profile(s) for "The Last Question" — waiting for model response · 1/2 casts designed (50%) · 40s elapsed
+[casting] Designing 13 character voice profile(s) for "The Last Question" — waiting for model response · 1/2 casts designed (50%) · 50s elapsed
+[casting] Checking and saving voice profiles · 51s elapsed
+[casting] Voice profiles saved · 51s elapsed
+[casting] casting complete.
+[casting] casting usage: 2 LLM calls · 1,612 prompt + 9,031 completion tokens (7,830 reasoning) · 51s
+[voices] Running voices…
+[voices] Loading voice catalogue and validating scripted speakers · 0s elapsed
+[voices] Matching narrator and character voices · 0/14 speakers matched (0%) · 0s elapsed
+[voices] Matched narrator voice · 1/14 speakers matched (7%) · 0s elapsed
+[voices] Matched voice for Bertram Lupov · 2/14 speakers matched (14%) · 0s elapsed
+[voices] Matched voice for Alexander Adell · 3/14 speakers matched (21%) · 0s elapsed
+[voices] Matched voice for MQ-17J · 4/14 speakers matched (28%) · 0s elapsed
+[voices] Matched voice for Jerrodd · 5/14 speakers matched (35%) · 0s elapsed
+[voices] Matched voice for VJ-23X · 6/14 speakers matched (42%) · 0s elapsed
+[voices] Matched voice for Zee Prime · 7/14 speakers matched (50%) · 0s elapsed
+[voices] Matched voice for Man (chapter 1) · 8/14 speakers matched (57%) · 0s elapsed
+[voices] Matched voice for Jerrodine · 9/14 speakers matched (64%) · 0s elapsed
+[voices] Matched voice for Universal AC · 10/14 speakers matched (71%) · 0s elapsed
+[voices] Matched voice for Dee Sub Wun · 11/14 speakers matched (78%) · 0s elapsed
+[voices] Matched voice for Jerrodette I · 12/14 speakers matched (85%) · 0s elapsed
+[voices] Matched voice for Jerrodette II · 13/14 speakers matched (92%) · 0s elapsed
+[voices] Matched voice for the man who had sensed Universal AC (chapter 1) · 14/14 speakers matched (100%) · 0s elapsed
+[voices] Voice bindings saved · 14/14 speakers matched (100%) · 0s elapsed
+[voices] voices complete.
+[voices] voices usage: no model calls · 0s
+
+Usage by stage:
+  script    no model calls · 0s
+  casting   2 LLM calls · 1,612 prompt + 9,031 completion tokens (7,830 reasoning) · 51s
+  voices    no model calls · 0s
+  total     2 LLM calls · 1,612 prompt + 9,031 completion tokens (7,830 reasoning) · 51s
+Saved in /Users/binnyva/Data/Projects/Personal/Lisen/EpubConvertor/work-dryrun/the-last-question/usage.json
+
+Dry run: stopping before "synth".
+Review /Users/binnyva/Data/Projects/Personal/Lisen/EpubConvertor/work-dryrun/the-last-question/1-scripts, /Users/binnyva/Data/Projects/Personal/Lisen/EpubConvertor/work-dryrun/the-last-question/characters.json and /Users/binnyva/Data/Projects/Personal/Lisen/EpubConvertor/work-dryrun/the-last-question/casting.json, then re-run without --dry-run.

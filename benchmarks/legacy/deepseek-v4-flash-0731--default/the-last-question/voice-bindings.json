@@ -1,0 +1,255 @@
+{
+  "version": 1,
+  "libraryFile": "/Users/binnyva/Data/Projects/Personal/Lisen/EpubConvertor/library/voices.json",
+  "target": {
+    "provider": "openrouter",
+    "model": "hexgrad/kokoro-82m"
+  },
+  "narrator": {
+    "libraryVoiceId": "openrouter:hexgrad/kokoro-82m:am_adam",
+    "provider": "openrouter",
+    "model": "hexgrad/kokoro-82m",
+    "voiceId": "am_adam",
+    "selection": "automatic",
+    "match": {
+      "reasons": [
+        "Compatible with openrouter/hexgrad/kokoro-82m.",
+        "Matches male presentation.",
+        "Matches en language."
+      ],
+      "limitations": [
+        "Requested General American accent; catalogue describes this voice as American English.",
+        "Requested adult; catalogue describes this voice as unknown.",
+        "This model does not support standing delivery instructions."
+      ]
+    }
+  },
+  "characters": {
+    "Bertram Lupov": {
+      "libraryVoiceId": "openrouter:hexgrad/kokoro-82m:am_echo",
+      "provider": "openrouter",
+      "model": "hexgrad/kokoro-82m",
+      "voiceId": "am_echo",
+      "selection": "automatic",
+      "match": {
+        "reasons": [
+          "Compatible with openrouter/hexgrad/kokoro-82m.",
+          "Matches male presentation.",
+          "Matches en language."
+        ],
+        "limitations": [
+          "This model does not support standing delivery instructions."
+        ]
+      }
+    },
+    "Alexander Adell": {
+      "libraryVoiceId": "openrouter:hexgrad/kokoro-82m:am_eric",
+      "provider": "openrouter",
+      "model": "hexgrad/kokoro-82m",
+      "voiceId": "am_eric",
+      "selection": "automatic",
+      "match": {
+        "reasons": [
+          "Compatible with openrouter/hexgrad/kokoro-82m.",
+          "Matches male presentation.",
+          "Matches en language."
+        ],
+        "limitations": [
+          "This model does not support standing delivery instructions."
+        ]
+      }
+    },
+    "MQ-17J": {
+      "libraryVoiceId": "openrouter:hexgrad/kokoro-82m:am_fenrir",
+      "provider": "openrouter",
+      "model": "hexgrad/kokoro-82m",
+      "voiceId": "am_fenrir",
+      "selection": "automatic",
+      "match": {
+        "reasons": [
+          "Compatible with openrouter/hexgrad/kokoro-82m.",
+          "Matches male presentation.",
+          "Matches en language."
+        ],
+        "limitations": [
+          "Requested early twenties (apparent); under two hundred; catalogue describes this voice as unknown.",
+          "This model does not support standing delivery instructions."
+        ]
+      }
+    },
+    "Jerrodd": {
+      "libraryVoiceId": "openrouter:hexgrad/kokoro-82m:am_liam",
+      "provider": "openrouter",
+      "model": "hexgrad/kokoro-82m",
+      "voiceId": "am_liam",
+      "selection": "automatic",
+      "match": {
+        "reasons": [
+          "Compatible with openrouter/hexgrad/kokoro-82m.",
+          "Matches male presentation.",
+          "Matches en language."
+        ],
+        "limitations": [
+          "Requested adult; catalogue describes this voice as unknown.",
+          "This model does not support standing delivery instructions."
+        ]
+      }
+    },
+    "VJ-23X": {
+      "libraryVoiceId": "openrouter:hexgrad/kokoro-82m:am_michael",
+      "provider": "openrouter",
+      "model": "hexgrad/kokoro-82m",
+      "voiceId": "am_michael",
+      "selection": "automatic",
+      "match": {
+        "reasons": [
+          "Compatible with openrouter/hexgrad/kokoro-82m.",
+          "Matches male presentation.",
+          "Matches en language."
+        ],
+        "limitations": [
+          "Requested early twenties (apparent); over two hundred; catalogue describes this voice as unknown.",
+          "This model does not support standing delivery instructions."
+        ]
+      }
+    },
+    "Zee Prime": {
+      "libraryVoiceId": "openrouter:hexgrad/kokoro-82m:am_onyx",
+      "provider": "openrouter",
+      "model": "hexgrad/kokoro-82m",
+      "voiceId": "am_onyx",
+      "selection": "automatic",
+      "match": {
+        "reasons": [
+          "Compatible with openrouter/hexgrad/kokoro-82m.",
+          "Matches male presentation.",
+          "Matches en language."
+        ],
+        "limitations": [
+          "This model does not support standing delivery instructions."
+        ]
+      }
+    },
+    "Man (chapter 1)": {
+      "libraryVoiceId": "openrouter:hexgrad/kokoro-82m:am_puck",
+      "provider": "openrouter",
+      "model": "hexgrad/kokoro-82m",
+      "voiceId": "am_puck",
+      "selection": "automatic",
+      "match": {
+        "reasons": [
+          "Compatible with openrouter/hexgrad/kokoro-82m.",
+          "Matches male presentation.",
+          "Matches en language."
+        ],
+        "limitations": [
+          "This model does not support standing delivery instructions."
+        ]
+      }
+    },
+    "Jerrodine": {
+      "libraryVoiceId": "openrouter:hexgrad/kokoro-82m:af_alloy",
+      "provider": "openrouter",
+      "model": "hexgrad/kokoro-82m",
+      "voiceId": "af_alloy",
+      "selection": "automatic",
+      "match": {
+        "reasons": [
+          "Compatible with openrouter/hexgrad/kokoro-82m.",
+          "Matches female presentation.",
+          "Matches en language."
+        ],
+        "limitations": [
+          "Requested adult; catalogue describes this voice as unknown.",
+          "This model does not support standing delivery instructions."
+        ]
+      }
+    },
+    "Universal AC": {
+      "libraryVoiceId": "openrouter:hexgrad/kokoro-82m:af_aoede",
+      "provider": "openrouter",
+      "model": "hexgrad/kokoro-82m",
+      "voiceId": "af_aoede",
+      "selection": "automatic",
+      "match": {
+        "reasons": [
+          "Compatible with openrouter/hexgrad/kokoro-82m.",
+          "Matches en language."
+        ],
+        "limitations": [
+          "Requested neutral presentation; catalogue describes this voice as female.",
+          "This model does not support standing delivery instructions."
+        ]
+      }
+    },
+    "Dee Sub Wun": {
+      "libraryVoiceId": "openrouter:hexgrad/kokoro-82m:af_bella",
+      "provider": "openrouter",
+      "model": "hexgrad/kokoro-82m",
+      "voiceId": "af_bella",
+      "selection": "automatic",
+      "match": {
+        "reasons": [
+          "Compatible with openrouter/hexgrad/kokoro-82m.",
+          "Matches en language."
+        ],
+        "limitations": [
+          "This model does not support standing delivery instructions."
+        ]
+      }
+    },
+    "Jerrodette I": {
+      "libraryVoiceId": "openrouter:hexgrad/kokoro-82m:af_heart",
+      "provider": "openrouter",
+      "model": "hexgrad/kokoro-82m",
+      "voiceId": "af_heart",
+      "selection": "automatic",
+      "match": {
+        "reasons": [
+          "Compatible with openrouter/hexgrad/kokoro-82m.",
+          "Matches female presentation.",
+          "Matches en language."
+        ],
+        "limitations": [
+          "Requested child; catalogue describes this voice as unknown.",
+          "This model does not support standing delivery instructions."
+        ]
+      }
+    },
+    "Jerrodette II": {
+      "libraryVoiceId": "openrouter:hexgrad/kokoro-82m:af_jessica",
+      "provider": "openrouter",
+      "model": "hexgrad/kokoro-82m",
+      "voiceId": "af_jessica",
+      "selection": "automatic",
+      "match": {
+        "reasons": [
+          "Compatible with openrouter/hexgrad/kokoro-82m.",
+          "Matches female presentation.",
+          "Matches en language."
+        ],
+        "limitations": [
+          "Requested child; catalogue describes this voice as unknown.",
+          "This model does not support standing delivery instructions."
+        ]
+      }
+    },
+    "the man who had sensed Universal AC (chapter 1)": {
+      "libraryVoiceId": "openrouter:hexgrad/kokoro-82m:am_santa",
+      "provider": "openrouter",
+      "model": "hexgrad/kokoro-82m",
+      "voiceId": "am_santa",
+      "selection": "automatic",
+      "match": {
+        "reasons": [
+          "Compatible with openrouter/hexgrad/kokoro-82m.",
+          "Matches male presentation.",
+          "Matches en language."
+        ],
+        "limitations": [
+          "This model does not support standing delivery instructions."
+        ]
+      }
+    }
+  }
+}

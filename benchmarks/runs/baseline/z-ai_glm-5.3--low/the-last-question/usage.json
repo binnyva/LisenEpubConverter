@@ -1,0 +1,27 @@
+[
+  {
+    "runId": "script-2026-11-11T17:33:06.326Z",
+    "stage": "script",
+    "startedAt": "2026-11-11T17:33:06.326Z",
+    "wallMs": 33975,
+    "outcome": "completed",
+    "llm": {
+      "calls": 8,
+      "promptTokens": 19763,
+      "completionTokens": 5215,
+      "reasoningTokens": 1011
+    },
+    "models": {
+      "z-ai/glm-5.3": {
+        "calls": 8,
+        "promptTokens": 19763,
+        "completionTokens": 5215,
+        "reasoningTokens": 1011
+      }
+    },
+    "tts": {
+      "calls": 0,
+      "characters": 0
+    }
+  }
+]

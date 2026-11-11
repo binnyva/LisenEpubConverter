@@ -6,7 +6,7 @@ import { WorkDir } from '../src/state.js';
 import { runExtract } from '../src/pipeline/extract.js';
 import { buildStories, validateStories } from '../src/pipeline/stories.js';
 import { splitOversizedChapter } from '../src/source/split.js';
-import type { Analysis, BookMetadata } from '../src/types.js';
+import type { BookMetadata, BookProfile } from '../src/types.js';
 
 const roots: string[] = [];
 afterEach(() => {
@@ -85,8 +85,8 @@ describe('runExtract with an oversized chapter', () => {
 describe('story grouping with split chapters', () => {
   const chapter = (index: number, title: string, part?: BookMetadata['chapters'][number]['part']) =>
     ({ index, id: `c${index}`, title, file: `chapters/${index}.md`, words: 5000, isNav: false, part });
-  const metadata = {
-    title: 'Collected', author: 'Author', language: 'en',
+  const base = {
+    title: 'Collected', author: 'Author', language: 'en', subjects: [], description: '',
     chapters: [
       chapter(0, 'Short'),
       chapter(1, 'Long', { first: 1, number: 1, total: 2 }),
@@ -94,26 +94,29 @@ describe('story grouping with split chapters', () => {
       chapter(3, 'Other'),
     ],
   } as BookMetadata;
-  const analysis = (stories: Analysis['stories']) => ({
-    isFiction: true, isCollection: true, stories,
-    chapters: metadata.chapters.map(({ index }) => ({ index, narrate: true, reason: '' })),
-  }) as unknown as Analysis;
+  const profiled = (stories: BookProfile['stories']): BookMetadata => ({
+    ...base,
+    profile: {
+      isFiction: true, form: 'short story collection', stories,
+      chapters: base.chapters.map(({ index, title }) => ({ index, title, narrate: true, reason: '' })),
+    } as unknown as BookProfile,
+  });
 
   it('keeps the parts of one story together by default', () => {
-    const stories = buildStories(true, metadata, analysis([]));
+    const stories = buildStories(true, profiled([]));
 
     expect(stories.stories.map((story) => [story.id, story.title, story.chapters])).toEqual([
       ['story-00', 'Short', [0]], ['story-01', 'Long', [1, 2]], ['story-03', 'Other', [3]],
     ]);
-    expect(() => validateStories(stories, metadata, analysis([]))).not.toThrow();
+    expect(() => validateStories(stories, profiled([]))).not.toThrow();
   });
 
   it('merges a proposal that put the parts in separate stories', () => {
-    const proposed = analysis([
+    const proposed = profiled([
       { title: 'Short', chapters: [0] }, { title: 'Long', chapters: [1] },
       { title: 'Long, continued', chapters: [2] }, { title: 'Other', chapters: [3] },
     ]);
 
-    expect(buildStories(true, metadata, proposed).stories.map((story) => story.chapters)).toEqual([[0], [1, 2], [3]]);
+    expect(buildStories(true, proposed).stories.map((story) => story.chapters)).toEqual([[0], [1, 2], [3]]);
   });
 });

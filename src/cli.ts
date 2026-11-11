@@ -15,9 +15,11 @@ for (const envFile of [
   }
 }
 import { config, STAGES, type Stage } from './config.js';
-import { openWorkDir } from './state.js';
+import { OUTDATED_WORK_FOLDER_MESSAGE, openWorkDir } from './state.js';
+import { CHARACTERS_FILE, SCRIPTS_DIR, USAGE_FILE } from './layout.js';
 import { checkApiKeys, checkFfmpeg } from './checks.js';
 import { discoverBooks, runStage } from './pipeline/runner.js';
+import { totalUsage, usageSummary, type StageUsage } from './util/usage.js';
 import { readStoriesFile } from './pipeline/stories.js';
 import { startLocalUi } from './ui/server.js';
 import { defaultVoiceTarget, importVoiceLibrary, loadVoiceLibrary, refreshVoiceLibrary, type VoiceTarget } from './voices/library.js';
@@ -63,11 +65,21 @@ program
       startAt = STAGES.indexOf(opts.from as Stage);
     }
 
+    const runId = `convert-${new Date().toISOString()}`;
+    const spent: StageUsage[] = [];
+    const reportRun = (): void => {
+      if (!spent.length) return;
+      console.log('\nUsage by stage:');
+      for (const usage of spent) console.log(`  ${usage.stage.padEnd(9)} ${usageSummary(usage)}`);
+      console.log(`  ${'total'.padEnd(9)} ${usageSummary(totalUsage(spent))}`);
+      console.log(`Saved in ${work.path(USAGE_FILE)}`);
+    };
     for (const [index, stage] of STAGES.entries()) {
       if (index < startAt) continue;
       if (opts.dryRun && (stage === 'synth' || stage === 'assemble')) {
+        reportRun();
         console.log(`\nDry run: stopping before "${stage}".`);
-        console.log(`Review ${work.path('script')} and ${work.path('casting.json')}, then re-run without --dry-run.`);
+        console.log(`Review ${work.path(SCRIPTS_DIR)}, ${work.path(CHARACTERS_FILE)} and ${work.path('casting.json')}, then re-run without --dry-run.`);
         return;
       }
       const result = await runStage({
@@ -78,9 +90,14 @@ program
         rebuild: (opts.force || Boolean(opts.from)) && index === startAt,
         metadataOverrides: sourceMetadataFromOptions(opts),
         collection: opts.collection,
+        runId,
         onEvent: (event) => console.log(`[${event.stage}] ${event.message}`),
       });
-      if (result.output) console.log(`\nDone: ${result.output}`);
+      if (result.usage) spent.push(result.usage);
+      if (result.output) {
+        reportRun();
+        console.log(`\nDone: ${result.output}`);
+      }
     }
   });
 
@@ -96,6 +113,7 @@ program
       process.exit(1);
     }
     const work = await openWorkDir(source, opts.work);
+    if (work.isOutdated()) throw new Error(OUTDATED_WORK_FOLDER_MESSAGE);
     const stories = readStoriesFile(work.root);
     if (opts.json) {
       console.log(JSON.stringify({ root: work.root, state: work.snapshot(), stages: work.status(), stories }, null, 2));
@@ -128,7 +146,7 @@ program
       return;
     }
     for (const book of books) {
-      console.log(`${book.sourceAvailable ? '✔' : '!' } ${book.sourcePath}`);
+      console.log(`${book.sourceAvailable ? '✔' : '!' } ${book.sourcePath}${book.outdated ? '  (earlier pipeline: rebuild from Extract)' : ''}`);
     }
   });
 
@@ -136,7 +154,7 @@ program
   .command('run')
   .argument('<source>', `path to a source file (${supportedSourceDescription()})`)
   .argument('<stage>', `stage to run (${STAGES.join(', ')})`)
-  .option('--chapters <indexes>', 'comma-separated chapter indexes (for chapters, script, synth, or assemble)')
+  .option('--chapters <indexes>', 'comma-separated chapter indexes (for script, synth, or assemble)')
   .option('--story <numbers>', 'comma-separated 1-based story numbers, as an alternative to --chapters')
   .option('--rerun', 'execute the stage even if it is already complete')
   .option('--rebuild', 'clear this stage and all derived output before running')
@@ -153,7 +171,7 @@ program
     assertSource(source);
     if (!sourceIsAvailable(source)) throw new Error(`file not found: ${source}`);
     if (stage === 'assemble') checkFfmpeg();
-    if (['analyze', 'chapters', 'script', 'casting'].includes(stage)) checkApiKeys([config.llmProvider]);
+    if (['metadata', 'script', 'casting'].includes(stage)) checkApiKeys([config.llmProvider]);
     if (stage === 'synth') checkApiKeys([config.ttsProvider]);
     const numbers = (value: unknown): number[] | undefined => value === undefined
       ? undefined

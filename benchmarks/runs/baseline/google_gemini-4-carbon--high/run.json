@@ -1,0 +1,61 @@
+{
+  "label": "baseline",
+  "model": "google/gemini-4-carbon",
+  "effort": "high",
+  "repeat": 1,
+  "version": {
+    "commit": "920e654cb81a790ea18cb7b163a3f9f60a61b67d",
+    "branch": "new-flow",
+    "dirty": true,
+    "packageVersion": "0.1.0",
+    "sourceHash": "a5336e00992be66f",
+    "baseStagesHash": "926c46558f6d2a94"
+  },
+  "tunables": {
+    "scriptChunkChars": 16000,
+    "scriptUnquotedChunkChars": 6000,
+    "scriptMaxQuotesPerChunk": 120,
+    "scriptVerificationBatchSize": 12,
+    "narrationMergeChars": 1500,
+    "llmConcurrency": 3,
+    "scriptMaxCompletionTokens": "65536",
+    "llmResponseTimeoutMs": "600000",
+    "llmMaxRetries": 5
+  },
+  "startedAt": "2026-11-11T17:12:03.120Z",
+  "finishedAt": "2026-11-11T17:34:47.693Z",
+  "wallMs": 1364563,
+  "exitCode": 0,
+  "outcome": "completed",
+  "usage": {
+    "calls": 7,
+    "promptTokens": 23626,
+    "completionTokens": 81230,
+    "reasoningTokens": 77015
+  },
+  "retries": 4,
+  "validationFailures": 0,
+  "calls": {
+    "byType": {
+      "attribution": {
+        "calls": 7,
+        "promptTokens": 23626,
+        "completionTokens": 81230,
+        "reasoningTokens": 77015,
+        "cost": 0.8567665999999999
+      }
+    },
+    "httpErrors": 0,
+    "transportErrors": 3,
+    "reportedCost": 0.8567665999999999
+  },
+  "price": {
+    "prompt": 2,
+    "completion": 10
+  },
+  "cost": {
+    "value": 0.8567665999999999,
+    "basis": "openrouter"
+  },
+  "workDir": "the-last-question"
+}

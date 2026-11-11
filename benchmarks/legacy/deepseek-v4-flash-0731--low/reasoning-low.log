@@ -1,0 +1,65 @@
+
+> lisen-epub-convertor@0.1.0 dev
+> tsx src/cli.ts run https://users.ece.cmu.edu/~gamvrosi/thelastq.html script --rerun --work ./work-dryrun/reasoning-low
+
+[script] Running script…
+[script] Chapter 0: "The Last Question" — Preparing script · 0/1 chapters complete · 0s elapsed
+[script] Chapter 0: "The Last Question" — Preparing script · 0/1 chapters complete · 0s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 2/8 (4% of text processed) — waiting for model response · 0/1 chapters complete · 0s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 2/8 (4% of text processed) — waiting for model response · 0/1 chapters complete · 10s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 2/8 (4% of text processed) — waiting for model response · 0/1 chapters complete · 20s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 2/8 (4% of text processed) — waiting for model response · 0/1 chapters complete · 30s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 2/8 (4% of text processed) — waiting for model response · 0/1 chapters complete · 40s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 3/8 (30% of text processed) — waiting for model response · 0/1 chapters complete · 43s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 3/8 (30% of text processed) — waiting for model response · 0/1 chapters complete · 50s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 3/8 (30% of text processed) — waiting for model response · 0/1 chapters complete · 60s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 3/8 (30% of text processed) — waiting for model response · 0/1 chapters complete · 70s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 3/8 (30% of text processed) — waiting for model response · 0/1 chapters complete · 80s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 3/8 (30% of text processed) — waiting for model response · 0/1 chapters complete · 90s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 3/8 (30% of text processed) — waiting for model response · 0/1 chapters complete · 100s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 3/8 (30% of text processed) — waiting for model response · 0/1 chapters complete · 110s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 4/8 (49% of text processed) — waiting for model response · 0/1 chapters complete · 112s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 4/8 (49% of text processed) — waiting for model response · 0/1 chapters complete · 120s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 4/8 (49% of text processed) — waiting for model response · 0/1 chapters complete · 130s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 4/8 (49% of text processed) — waiting for model response · 0/1 chapters complete · 140s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 4/8 (49% of text processed) — waiting for model response · 0/1 chapters complete · 150s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 4/8 (49% of text processed) — waiting for model response · 0/1 chapters complete · 160s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 4/8 (49% of text processed) — waiting for model response · 0/1 chapters complete · 170s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 4/8 (49% of text processed) — waiting for model response · 0/1 chapters complete · 180s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 4/8 (49% of text processed) — waiting for model response · 0/1 chapters complete · 190s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 4/8 (49% of text processed) — waiting for model response · 0/1 chapters complete · 200s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 4/8 (49% of text processed) — waiting for model response · 0/1 chapters complete · 210s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 4/8 (49% of text processed) — waiting for model response · 0/1 chapters complete · 220s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 5/8 (65% of text processed) — waiting for model response · 0/1 chapters complete · 222s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 5/8 (65% of text processed) — waiting for model response · 0/1 chapters complete · 230s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 5/8 (65% of text processed) — waiting for model response · 0/1 chapters complete · 240s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 5/8 (65% of text processed) — waiting for model response · 0/1 chapters complete · 250s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 5/8 (65% of text processed) — waiting for model response · 0/1 chapters complete · 260s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 5/8 (65% of text processed) — waiting for model response · 0/1 chapters complete · 270s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 5/8 (65% of text processed) — waiting for model response · 0/1 chapters complete · 280s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 5/8 (65% of text processed) — waiting for model response · 0/1 chapters complete · 290s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 5/8 (65% of text processed) — waiting for model response · 0/1 chapters complete · 300s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 5/8 (65% of text processed) — waiting for model response · 0/1 chapters complete · 310s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 6/8 (83% of text processed) — waiting for model response · 0/1 chapters complete · 319s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 6/8 (83% of text processed) — waiting for model response · 0/1 chapters complete · 320s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 6/8 (83% of text processed) — waiting for model response · 0/1 chapters complete · 330s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 6/8 (83% of text processed) — waiting for model response · 0/1 chapters complete · 340s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 6/8 (83% of text processed) — waiting for model response · 0/1 chapters complete · 350s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 6/8 (83% of text processed) — waiting for model response · 0/1 chapters complete · 360s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 7/8 (92% of text processed) — waiting for model response · 0/1 chapters complete · 361s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 8/8 (95% of text processed) — waiting for model response · 0/1 chapters complete · 366s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 8/8 (95% of text processed) — waiting for model response · 0/1 chapters complete · 370s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 8/8 (95% of text processed) — waiting for model response · 0/1 chapters complete · 380s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 8/8 (95% of text processed) — waiting for model response · 0/1 chapters complete · 390s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 8/8 (95% of text processed) — waiting for model response · 0/1 chapters complete · 400s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 8/8 (95% of text processed) — waiting for model response · 0/1 chapters complete · 410s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 8/8 (95% of text processed) — waiting for model response · 0/1 chapters complete · 420s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 8/8 (95% of text processed) — waiting for model response · 0/1 chapters complete · 430s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 8/8 (95% of text processed) — waiting for model response · 0/1 chapters complete · 440s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 8/8 (95% of text processed) — waiting for model response · 0/1 chapters complete · 450s elapsed
+[script] Chapter 0: "The Last Question" — Blocks complete. Verifying 4 speaker assignment(s) · 0/1 chapters complete · 455s elapsed
+[script] Chapter 0: "The Last Question" — Blocks complete. Verifying 4 speaker assignment(s) · 0/1 chapters complete · 460s elapsed
+[script] Chapter 0: "The Last Question" — Text processed. Saving script · 0/1 chapters complete · 460s elapsed
+[script] Chapter 0: "The Last Question" — Chapter complete · 1/1 chapters complete · 460s elapsed
+[script] script complete.
+[script] script usage: 8 LLM calls · 19,611 prompt + 42,119 completion tokens (37,651 reasoning) · 7m 41s

@@ -1,0 +1,54 @@
+{
+  "label": "baseline",
+  "model": "mistralai/mistral-large-4-0",
+  "effort": "none",
+  "repeat": 1,
+  "version": {
+    "commit": "920e654cb81a790ea18cb7b163a3f9f60a61b67d",
+    "branch": "new-flow",
+    "dirty": true,
+    "packageVersion": "0.1.0",
+    "sourceHash": "a5336e00992be66f",
+    "baseStagesHash": "926c46558f6d2a94"
+  },
+  "tunables": {
+    "scriptChunkChars": 16000,
+    "scriptUnquotedChunkChars": 6000,
+    "scriptMaxQuotesPerChunk": 120,
+    "scriptVerificationBatchSize": 12,
+    "narrationMergeChars": 1500,
+    "llmConcurrency": 3,
+    "scriptMaxCompletionTokens": "16384",
+    "llmResponseTimeoutMs": "600000",
+    "llmMaxRetries": 5
+  },
+  "startedAt": "2026-11-11T17:22:43.245Z",
+  "finishedAt": "2026-11-11T17:22:48.078Z",
+  "wallMs": 4833,
+  "exitCode": 1,
+  "outcome": "rejected",
+  "reason": "OpenRouter LLM request failed (400): Provider returned error ({\"object\":\"error\",\"message\":\"reasoning_effort none is not supported for this model, supported values: [<ReasoningEffort.high: 'high'>, <ReasoningEffort.low: 'low'>, <ReasoningEffort.medium: 'medium'>]\",\"type\":\"invalid_request_invalid_args\",\"param\":null,\"code\":\"3051\",\"raw_status_code\":400}). Diagnostics: {\"content\":\"undefined\",\"errorCode\":400,\"upstreamError\":\"{\\\"object\\\":\\\"error\\\",\\\"message\\\":\\\"reasoning_effort none is not supported for this model, supported values: [<ReasoningEffort.high: 'high'>, <ReasoningEffort.low: 'low'>, <Reas",
+  "usage": {
+    "calls": 0,
+    "promptTokens": 0,
+    "completionTokens": 0,
+    "reasoningTokens": 0
+  },
+  "retries": 0,
+  "validationFailures": 0,
+  "calls": {
+    "byType": {},
+    "httpErrors": 1,
+    "transportErrors": 0,
+    "reportedCost": 0
+  },
+  "price": {
+    "prompt": 0.7,
+    "completion": 2.0999999999999996
+  },
+  "cost": {
+    "value": 0,
+    "basis": "openrouter"
+  },
+  "workDir": "the-last-question"
+}

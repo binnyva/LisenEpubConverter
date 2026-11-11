@@ -1,0 +1,19 @@
+[script] Running script…
+[script] Chapter 0: "The Last Question" — Preparing script · 0/1 chapters complete · 0s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 1/7 (0% of text processed) — waiting for model response · 0/1 chapters complete · 0s elapsed
+[script] Chapter 1, block 1: 1 label(s) for narration, unknown or repeated spans were ignored.
+[script] Chapter 0: "The Last Question" — Scripting block 2/7 (27% of text processed) — waiting for model response · 0/1 chapters complete · 6s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 2/7 (27% of text processed) — waiting for model response · 0/1 chapters complete · 10s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 3/7 (46% of text processed) — waiting for model response · 0/1 chapters complete · 10s elapsed
+[script] Chapter 1, block 3: 3 quoted span(s) came back without a speaker and go to verification.
+[script] Chapter 0: "The Last Question" — Scripting block 4/7 (64% of text processed) — waiting for model response · 0/1 chapters complete · 14s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 4/7 (64% of text processed) — waiting for model response · 0/1 chapters complete · 20s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 5/7 (82% of text processed) — waiting for model response · 0/1 chapters complete · 23s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 6/7 (92% of text processed) — waiting for model response · 0/1 chapters complete · 29s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 6/7 (92% of text processed) — waiting for model response · 0/1 chapters complete · 30s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 7/7 (95% of text processed) — waiting for model response · 0/1 chapters complete · 30s elapsed
+[script] Chapter 0: "The Last Question" — Blocks complete. Verifying 56 speaker assignment(s) · 0/1 chapters complete · 31s elapsed
+[script] Chapter 0: "The Last Question" — Blocks complete. Verifying 56 speaker assignment(s) · 0/1 chapters complete · 40s elapsed
+[script] script usage: 12 LLM calls · 29,389 prompt + 6,132 completion tokens (1,213 reasoning) · 45s
+
+Error: New or unresolved speakers in chapter 1: Jerrodine. They are listed under "unresolved" in characters.json and in the workspace's Cast panel. For each, add the character, or set "resolveAs" to an existing character's name or to "narrator", then run Script again: the attributed text is kept and is not paid for twice.

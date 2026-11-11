@@ -53,11 +53,12 @@ describe('OpenRouter LLM provider', () => {
       max_tokens: 4096,
       provider: { require_parameters: true },
     });
-    expect(JSON.parse(init.body as string)).not.toHaveProperty('reasoning');
+    // Reasoning is off unless configured: a model left to its default can reason at length.
+    expect(JSON.parse(init.body as string).reasoning).toEqual({ enabled: false });
     expect(init.headers).toMatchObject({ 'X-OpenRouter-Metadata': 'enabled' });
   });
 
-  it('includes reasoning only when a non-default effort is configured', async () => {
+  it('sends a reasoning effort when one is configured', async () => {
     vi.stubEnv('LISEN_LLM_PROVIDER', 'openrouter');
     vi.stubEnv('OPENROUTER_API_KEY', 'test-key');
     vi.stubEnv('LISEN_OPENROUTER_REASONING_EFFORT', 'high');
@@ -111,8 +112,28 @@ describe('OpenRouter LLM provider', () => {
     const first = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string);
     const second = JSON.parse((fetchMock.mock.calls[1] as [string, RequestInit])[1].body as string);
     expect(first).toMatchObject({ reasoning: { effort: 'medium' }, max_tokens: 8192 });
-    expect(second).not.toHaveProperty('reasoning');
+    expect(second.reasoning).toEqual({ enabled: false });
     expect(second.max_tokens).toBe(4096);
+  });
+
+  it('leaves reasoning to the provider only when asked to, and says how after a routing failure', async () => {
+    vi.stubEnv('LISEN_LLM_PROVIDER', 'openrouter');
+    vi.stubEnv('OPENROUTER_API_KEY', 'test-key');
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: '{"answer":"ready"}' } }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'No endpoints found that support the requested parameters.' } }), { status: 404 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const { jsonCall } = await import('../src/providers/llm/openai.js');
+    const { config } = await import('../src/config.js');
+    const base = { model: 'example/plain-model', system: 'Return JSON.', user: 'Go.', schema: z.object({ answer: z.string() }), maxRetries: 1 };
+
+    expect(config.openRouterReasoningEffort).toBe('none');
+    expect(config.scriptReasoningEffort).toBe('none');
+    await jsonCall({ ...base, reasoningEffort: 'default' });
+    expect(JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string)).not.toHaveProperty('reasoning');
+
+    await expect(jsonCall(base)).rejects.toThrow('LISEN_OPENROUTER_REASONING_EFFORT=default');
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('stops instead of retrying a response exhausted by reasoning tokens', async () => {

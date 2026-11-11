@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { WorkDir } from '../src/state.js';
+import { OUTDATED_WORK_FOLDER_MESSAGE, WorkDir } from '../src/state.js';
 
 const temporaryRoots: string[] = [];
 
@@ -45,26 +45,32 @@ describe('WorkDir chapter completion', () => {
     expect(changed.sourceChanged()).toBe(true);
     expect(changed.isDone('extract')).toBe(true);
 
-    changed.acceptCurrentEpub();
+    changed.acceptCurrentSource();
     expect(changed.sourceChanged()).toBe(false);
   });
 
-  it('migrates a legacy EPUB state manifest without losing its completion record', () => {
+  it('flags a folder from an earlier pipeline and refuses to change it', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lisen-state-'));
     temporaryRoots.push(root);
     const epub = path.join(root, 'book.epub');
-    fs.writeFileSync(epub, 'legacy source');
+    fs.writeFileSync(epub, 'earlier source');
     const work = new WorkDir(epub, root);
-    fs.writeFileSync(work.path('state.json'), JSON.stringify({
-      epub,
-      epubHash: crypto.createHash('sha256').update('legacy source').digest('hex').slice(0, 16),
-      completed: { extract: '2026-01-01T00:00:00.000Z' },
-      chapterCompleted: {},
-    }));
+    const earlier = JSON.stringify({
+      version: 2, source: epub, sourceFormat: 'epub',
+      sourceHash: crypto.createHash('sha256').update('earlier source').digest('hex').slice(0, 16),
+      completed: { extract: '2026-01-01T00:00:00.000Z', analyze: '2026-01-01T00:00:00.000Z' },
+    });
+    fs.writeFileSync(work.path('state.json'), earlier);
 
-    const migrated = new WorkDir(epub, root);
-    expect(migrated.snapshot()).toMatchObject({ version: 2, source: epub, sourceFormat: 'epub' });
-    expect(migrated.isDone('extract')).toBe(true);
+    const reopened = new WorkDir(epub, root);
+    expect(reopened.isOutdated()).toBe(true);
+    expect(reopened.isDone('extract')).toBe(false);
+    expect(() => reopened.markDone('extract')).toThrow(OUTDATED_WORK_FOLDER_MESSAGE);
+    expect(fs.readFileSync(work.path('state.json'), 'utf8')).toBe(earlier);
+
+    reopened.adoptCurrentLayout();
+    expect(new WorkDir(epub, root).isOutdated()).toBe(false);
+    expect(new WorkDir(epub, root).snapshot()).toMatchObject({ version: 3, source: epub, completed: {} });
   });
 
   it('detects hand edits to the cast or bindings after synthesis', () => {

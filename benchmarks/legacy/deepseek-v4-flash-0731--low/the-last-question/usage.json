@@ -1,0 +1,120 @@
+[
+  {
+    "runId": "extract-2026-11-10T22:41:08.832Z",
+    "stage": "extract",
+    "startedAt": "2026-11-10T22:41:08.832Z",
+    "wallMs": 1168,
+    "outcome": "completed",
+    "llm": {
+      "calls": 0,
+      "promptTokens": 0,
+      "completionTokens": 0,
+      "reasoningTokens": 0
+    },
+    "models": {},
+    "tts": {
+      "calls": 0,
+      "characters": 0
+    }
+  },
+  {
+    "runId": "metadata-2026-11-10T22:41:10.786Z",
+    "stage": "metadata",
+    "startedAt": "2026-11-10T22:41:10.786Z",
+    "wallMs": 2344,
+    "outcome": "completed",
+    "llm": {
+      "calls": 1,
+      "promptTokens": 3393,
+      "completionTokens": 259,
+      "reasoningTokens": 0
+    },
+    "models": {
+      "deepseek/deepseek-v4-flash-0731": {
+        "calls": 1,
+        "promptTokens": 3393,
+        "completionTokens": 259,
+        "reasoningTokens": 0
+      }
+    },
+    "tts": {
+      "calls": 0,
+      "characters": 0
+    }
+  },
+  {
+    "runId": "script-2026-11-10T22:41:13.938Z",
+    "stage": "script",
+    "startedAt": "2026-11-10T22:41:13.938Z",
+    "wallMs": 29307,
+    "outcome": "failed",
+    "llm": {
+      "calls": 12,
+      "promptTokens": 28950,
+      "completionTokens": 4797,
+      "reasoningTokens": 0
+    },
+    "models": {
+      "deepseek/deepseek-v4-flash-0731": {
+        "calls": 12,
+        "promptTokens": 28950,
+        "completionTokens": 4797,
+        "reasoningTokens": 0
+      }
+    },
+    "tts": {
+      "calls": 0,
+      "characters": 0
+    }
+  },
+  {
+    "runId": "script-2026-11-10T22:43:21.665Z",
+    "stage": "script",
+    "startedAt": "2026-11-10T22:43:21.665Z",
+    "wallMs": 42353,
+    "outcome": "completed",
+    "llm": {
+      "calls": 11,
+      "promptTokens": 30550,
+      "completionTokens": 5860,
+      "reasoningTokens": 0
+    },
+    "models": {
+      "deepseek/deepseek-v4-flash-0731": {
+        "calls": 11,
+        "promptTokens": 30550,
+        "completionTokens": 5860,
+        "reasoningTokens": 0
+      }
+    },
+    "tts": {
+      "calls": 0,
+      "characters": 0
+    }
+  },
+  {
+    "runId": "script-2026-11-11T09:57:54.966Z",
+    "stage": "script",
+    "startedAt": "2026-11-11T09:57:54.966Z",
+    "wallMs": 460783,
+    "outcome": "completed",
+    "llm": {
+      "calls": 8,
+      "promptTokens": 19611,
+      "completionTokens": 42119,
+      "reasoningTokens": 37651
+    },
+    "models": {
+      "deepseek/deepseek-v4-flash-0731": {
+        "calls": 8,
+        "promptTokens": 19611,
+        "completionTokens": 42119,
+        "reasoningTokens": 37651
+      }
+    },
+    "tts": {
+      "calls": 0,
+      "characters": 0
+    }
+  }
+]

@@ -1,0 +1,20 @@
+[
+  {
+    "runId": "script-2026-11-11T17:12:02.783Z",
+    "stage": "script",
+    "startedAt": "2026-11-11T17:12:02.783Z",
+    "wallMs": 291,
+    "outcome": "failed",
+    "llm": {
+      "calls": 0,
+      "promptTokens": 0,
+      "completionTokens": 0,
+      "reasoningTokens": 0
+    },
+    "models": {},
+    "tts": {
+      "calls": 0,
+      "characters": 0
+    }
+  }
+]

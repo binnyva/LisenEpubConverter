@@ -1,0 +1,20 @@
+[script] Running script…
+[script] Chapter 0: "The Last Question" — Preparing script · 0/1 chapters complete · 0s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 1/7 (0% of text processed) — waiting for model response · 0/1 chapters complete · 0s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 2/7 (27% of text processed) — waiting for model response · 0/1 chapters complete · 9s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 2/7 (27% of text processed) — waiting for model response · 0/1 chapters complete · 10s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 2/7 (27% of text processed) — waiting for model response · 0/1 chapters complete · 20s elapsed
+[script] Chapter 1, block 2: 1 quoted span(s) came back without a speaker and go to verification.
+[script] Chapter 0: "The Last Question" — Scripting block 3/7 (46% of text processed) — waiting for model response · 0/1 chapters complete · 20s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 3/7 (46% of text processed) — waiting for model response · 0/1 chapters complete · 30s elapsed
+[script] Chapter 1, block 3: 1 quoted span(s) came back without a speaker and go to verification.
+[script] Chapter 0: "The Last Question" — Scripting block 4/7 (64% of text processed) — waiting for model response · 0/1 chapters complete · 30s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 5/7 (82% of text processed) — waiting for model response · 0/1 chapters complete · 38s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 5/7 (82% of text processed) — waiting for model response · 0/1 chapters complete · 40s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 6/7 (92% of text processed) — waiting for model response · 0/1 chapters complete · 44s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 7/7 (95% of text processed) — waiting for model response · 0/1 chapters complete · 45s elapsed
+[script] Chapter 0: "The Last Question" — Blocks complete. Verifying 22 speaker assignment(s) · 0/1 chapters complete · 46s elapsed
+[script] Chapter 0: "The Last Question" — Blocks complete. Verifying 22 speaker assignment(s) · 0/1 chapters complete · 50s elapsed
+[script] script usage: 9 LLM calls · 41,629 prompt + 11,739 completion tokens (5,727 reasoning) · 51s
+
+Error: New or unresolved speakers in chapter 1: unresolved speaker. They are listed under "unresolved" in characters.json and in the workspace's Cast panel. For each, add the character, or set "resolveAs" to an existing character's name or to "narrator", then run Script again: the attributed text is kept and is not paid for twice.

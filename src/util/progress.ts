@@ -53,13 +53,12 @@ export interface ChapterProgress {
   chapterTitle: string;
   completedChapters: number;
   totalChapters: number;
-  phase: 'preparing' | 'attributing' | 'repairing' | 'verifying' | 'saving' | 'completed' | 'skipped';
+  phase: 'preparing' | 'attributing' | 'verifying' | 'saving' | 'completed' | 'skipped';
   processedChars: number;
   totalChars: number;
   block?: number;
   totalBlocks?: number;
   ambiguousSegments?: number;
-  auditedSegments?: number;
   elapsedMs: number;
 }
 
@@ -69,9 +68,8 @@ export function progressMessage(progress: ChapterProgress): string {
   const percent = progress.totalChars ? Math.floor(100 * progress.processedChars / progress.totalChars) : 0;
   const activity = {
     preparing: 'Preparing script',
-    attributing: `Attributing block ${progress.block}/${progress.totalBlocks} (${percent}% of text processed)`,
-    repairing: `Repairing narration boundaries in ${progress.auditedSegments} segment(s)`,
-    verifying: `Attribution complete. Verifying ${progress.ambiguousSegments} speaker assignment(s)`,
+    attributing: `Scripting block ${progress.block}/${progress.totalBlocks} (${percent}% of text processed) — waiting for model response`,
+    verifying: `Blocks complete. Verifying ${progress.ambiguousSegments} speaker assignment(s)`,
     saving: 'Text processed. Saving script',
     completed: 'Chapter complete',
     skipped: 'Reusing existing script',

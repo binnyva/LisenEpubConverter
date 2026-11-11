@@ -9,13 +9,20 @@ import type { WorkDir } from '../state.js';
  * when its key no longer matches the inputs, and removed once the chapter's
  * real output has been saved.
  */
-export type CheckpointStage = 'chapters' | 'script';
+export type CheckpointStage = 'script';
 
 const CHECKPOINT_DIR = 'checkpoints';
 
-interface CheckpointFile<T> {
+interface CheckpointFile<T, R> {
   key: string;
   blocks: T[];
+  /** Work done after the last block, such as verified speakers; saved once every block is finished. */
+  result?: R;
+}
+
+export interface Checkpoint<T, R> {
+  blocks: T[];
+  result?: R;
 }
 
 const checkpointFile = (stage: CheckpointStage, index: number): string =>
@@ -27,25 +34,25 @@ export function checkpointKey(...parts: Array<string | number>): string {
 }
 
 /** Completed blocks, in order, or none when the inputs changed or the file is unreadable. */
-export function loadCheckpoint<T>(work: WorkDir, stage: CheckpointStage, index: number, key: string, totalBlocks: number): T[] {
+export function loadCheckpoint<T, R = never>(work: WorkDir, stage: CheckpointStage, index: number, key: string, totalBlocks: number): Checkpoint<T, R> {
   const file = work.path(checkpointFile(stage, index));
-  if (!fs.existsSync(file)) return [];
+  if (!fs.existsSync(file)) return { blocks: [] };
   try {
-    const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as CheckpointFile<T>;
-    if (saved.key !== key || !Array.isArray(saved.blocks) || saved.blocks.length > totalBlocks) return [];
-    return saved.blocks;
+    const saved = JSON.parse(fs.readFileSync(file, 'utf8')) as CheckpointFile<T, R>;
+    if (saved.key !== key || !Array.isArray(saved.blocks) || saved.blocks.length > totalBlocks) return { blocks: [] };
+    return { blocks: saved.blocks, result: saved.blocks.length === totalBlocks ? saved.result : undefined };
   } catch {
     // A write interrupted mid-file is the same as no checkpoint.
-    return [];
+    return { blocks: [] };
   }
 }
 
-export function saveCheckpoint<T>(work: WorkDir, stage: CheckpointStage, index: number, key: string, blocks: T[]): void {
+export function saveCheckpoint<T, R = never>(work: WorkDir, stage: CheckpointStage, index: number, key: string, blocks: T[], result?: R): void {
   const rel = checkpointFile(stage, index);
   work.dir(CHECKPOINT_DIR);
   // Write-then-rename so a cancelled task never leaves a truncated file.
   const tmp = `${work.path(rel)}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify({ key, blocks } satisfies CheckpointFile<T>));
+  fs.writeFileSync(tmp, JSON.stringify({ key, blocks, ...(result === undefined ? {} : { result }) } satisfies CheckpointFile<T, R>));
   fs.renameSync(tmp, work.path(rel));
 }
 

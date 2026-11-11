@@ -29,6 +29,9 @@ function makeTestEpub(file: string): void {
     <dc:title>Test Book</dc:title>
     <dc:creator>Jane Tester</dc:creator>
     <dc:language>en</dc:language>
+    <dc:subject>Fiction</dc:subject>
+    <dc:subject>Adventure</dc:subject>
+    <dc:description>&lt;p&gt;A &lt;b&gt;test&lt;/b&gt; of a book.&lt;/p&gt;</dc:description>
   </metadata>
   <manifest>
     <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
@@ -89,6 +92,12 @@ describe('parseEpub', () => {
     expect(epub.tocTitles.get('ch1.xhtml')).toBe('The Beginning');
     expect(epub.cover?.ext).toBe('.jpg');
   });
+
+  it('reads subjects and the description as plain text', () => {
+    const epub = parseEpub(epubPath);
+    expect(epub.subjects).toEqual(['Fiction', 'Adventure']);
+    expect(epub.description).toBe('A test of a book.');
+  });
 });
 
 describe('runExtract', () => {
@@ -99,6 +108,10 @@ describe('runExtract', () => {
     expect(meta.chapters).toHaveLength(3);
     expect(meta.chapters[1].title).toBe('The Beginning');
     expect(meta.coverFile).toBe('cover.jpg');
+    expect(meta.chapters.map((chapter) => chapter.file)).toEqual(['0-chapters/00-section-1.md', '0-chapters/01-the-beginning.md', '0-chapters/02-the-end.md']);
+    expect(meta.subjects).toEqual(['Fiction', 'Adventure']);
+    expect(meta.description).toBe('A test of a book.');
+    expect(meta.profile).toBeUndefined();
 
     const ch1 = fs.readFileSync(work.path(meta.chapters[1].file), 'utf8');
     expect(ch1).toContain('# The Beginning');

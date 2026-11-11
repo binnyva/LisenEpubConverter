@@ -1,0 +1,292 @@
+{
+  "version": 3,
+  "stories": [
+    {
+      "id": "book",
+      "title": "The Last Question"
+    }
+  ],
+  "characters": [
+    {
+      "id": "char-188db5cdc3a6f230",
+      "name": "Alexander Adell",
+      "story": "book",
+      "aliases": [
+        "Adell"
+      ],
+      "sex": "male",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 0,
+          "text": "\"said Adell\" and \"Alexander Adell and Bertram Lupov were two of the faithful attendants of Multivac.\""
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-cbc985851ccbf045",
+      "name": "Bertram Lupov",
+      "story": "book",
+      "aliases": [
+        "Bert"
+      ],
+      "sex": "male",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 0,
+          "text": "\"Lupov cocked his head sideways... 'Not forever,' he said.\""
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-c4fa6cbc13df82bb",
+      "name": "Jerrodd",
+      "story": "book",
+      "aliases": [],
+      "sex": "male",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 1,
+          "text": "said Jerrodd confidently. His thin hands clamped tightly behind his back"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-c1993421ce65f50b",
+      "name": "Jerrodine",
+      "story": "book",
+      "aliases": [],
+      "sex": "female",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 1,
+          "text": "said Jerrodine sharply."
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-48f3a47593a4fdc1",
+      "name": "Jerrodette I",
+      "story": "book",
+      "aliases": [],
+      "sex": "female",
+      "age": "child",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 1,
+          "text": "Jerrodette I said promptly, \"Our Microvac is the best Microvac in the world.\""
+        }
+      ],
+      "issues": [
+        "Ambiguous alias \"Jerrodettes\"; not used for automatic attribution."
+      ]
+    },
+    {
+      "id": "char-f6b178cd821f7bc3",
+      "name": "Jerrodette II",
+      "story": "book",
+      "aliases": [],
+      "sex": "female",
+      "age": "child",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 1,
+          "text": "\"What's entropy, daddy?\" shrilled Jerrodette II."
+        }
+      ],
+      "issues": [
+        "Ambiguous alias \"Jerrodettes\"; not used for automatic attribution."
+      ]
+    },
+    {
+      "id": "char-a1f7831bfc1411f9",
+      "name": "VJ-23X of Lameth",
+      "story": "book",
+      "aliases": [],
+      "sex": "male",
+      "age": "200+ (appears early twenties)",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 2,
+          "text": "VJ-23X stared into the black depths... and said, \"Are we ridiculous...\"; \"Two hundred twenty-three. And you?\""
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-86416fb8dc506cf8",
+      "name": "MQ-17J of Nicron",
+      "story": "book",
+      "aliases": [],
+      "sex": "male",
+      "age": "under two hundred (appears early twenties)",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 2,
+          "text": "MQ-17J of Nicron shook his head. \"I think not.\"; \"I'm still under two hundred. --But to get back to my point.\""
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-210c983b5a549b81",
+      "name": "Zee Prime",
+      "story": "book",
+      "aliases": [],
+      "sex": "male",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 3,
+          "text": "I am Zee Prime,"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-37db71b2992e622f",
+      "name": "Dee Sub Wun",
+      "story": "book",
+      "aliases": [],
+      "sex": "male",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 3,
+          "text": "I am Dee Sub Wun."
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-dce31272e1b1bb0c",
+      "name": "Universal AC",
+      "story": "book",
+      "aliases": [],
+      "sex": "unknown",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 3,
+          "text": "THIS IS THE ORIGINAL GALAXY OF MAN."
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-65b7bd62fc0a9ff9",
+      "name": "Man",
+      "story": "book",
+      "aliases": [],
+      "sex": "unknown",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 4,
+          "text": "Man said, \"Can entropy not be reversed?\" — the collective mind of humanity, whose individual bodies have melted into one mind."
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-998d4e549b458d91",
+      "name": "Cosmic AC",
+      "story": "book",
+      "aliases": [],
+      "sex": "unknown",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 4,
+          "text": "The Cosmic AC said, \"THERE IS AS YET INSUFFICIENT DATA FOR A MEANINGFUL ANSWER.\""
+        }
+      ],
+      "issues": []
+    }
+  ],
+  "unresolved": [
+    {
+      "story": "book",
+      "chapter": 0,
+      "speaker": "Jerrodette I and Jerrodette II",
+      "samples": [
+        {
+          "text": "\"We've reached X-23 -- we've\nreached X-23 -- we've --\"",
+          "context": "   [Jerrodd] \"That's X-23,\"\n   [narrator] said Jerrodd confidently. His thin\nhands clamped tightly behind his back and the knuckles whitened.\n\nThe little Jerrodettes, both girls, had experienced\nthe hyperspace passage for the first time in th\n>> [Jerrodette I and Jerrodette II] \"We've reached X-23 -- we've\nreached X-23 -- we've --\"\n   [Jerrodine] \"Quiet, children.\"\n   [narrator] said Jerrodine sharply."
+        }
+      ]
+    }
+  ]
+}

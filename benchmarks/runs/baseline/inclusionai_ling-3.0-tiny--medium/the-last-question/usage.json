@@ -1,0 +1,27 @@
+[
+  {
+    "runId": "script-2026-11-11T16:09:21.478Z",
+    "stage": "script",
+    "startedAt": "2026-11-11T16:09:21.478Z",
+    "wallMs": 787333,
+    "outcome": "failed",
+    "llm": {
+      "calls": 8,
+      "promptTokens": 20701,
+      "completionTokens": 118624,
+      "reasoningTokens": 112619
+    },
+    "models": {
+      "inclusionai/ling-3.0-tiny": {
+        "calls": 8,
+        "promptTokens": 20701,
+        "completionTokens": 118624,
+        "reasoningTokens": 112619
+      }
+    },
+    "tts": {
+      "calls": 0,
+      "characters": 0
+    }
+  }
+]

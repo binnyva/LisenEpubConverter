@@ -1,0 +1,69 @@
+{
+  "label": "baseline",
+  "model": "z-ai/glm-5.3-flash",
+  "effort": "high",
+  "repeat": 3,
+  "version": {
+    "commit": "920e654cb81a790ea18cb7b163a3f9f60a61b67d",
+    "branch": "new-flow",
+    "dirty": true,
+    "packageVersion": "0.1.0",
+    "sourceHash": "a5336e00992be66f",
+    "baseStagesHash": "926c46558f6d2a94"
+  },
+  "tunables": {
+    "scriptChunkChars": 16000,
+    "scriptUnquotedChunkChars": 6000,
+    "scriptMaxQuotesPerChunk": 120,
+    "scriptVerificationBatchSize": 12,
+    "narrationMergeChars": 1500,
+    "llmConcurrency": 3,
+    "scriptMaxCompletionTokens": "65536",
+    "llmResponseTimeoutMs": "600000",
+    "llmMaxRetries": 5
+  },
+  "startedAt": "2026-11-11T17:43:42.235Z",
+  "finishedAt": "2026-11-11T17:45:18.940Z",
+  "wallMs": 96703,
+  "exitCode": 1,
+  "outcome": "blocked",
+  "reason": "New or unresolved speakers in chapter 1: Jerrodette I and Jerrodette II. They are listed under \"unresolved\" in characters.json and in the workspace's Cast panel. For each, add the character, or set \"resolveAs\" to an existing character's name or to \"narrator\", then run Script again: the attributed text is kept and is not paid for twice.",
+  "usage": {
+    "calls": 8,
+    "promptTokens": 19747,
+    "completionTokens": 13102,
+    "reasoningTokens": 8917
+  },
+  "retries": 0,
+  "validationFailures": 0,
+  "calls": {
+    "byType": {
+      "attribution": {
+        "calls": 7,
+        "promptTokens": 17997,
+        "completionTokens": 10731,
+        "reasoningTokens": 6675,
+        "cost": 0.005383753000000001
+      },
+      "verification": {
+        "calls": 1,
+        "promptTokens": 1750,
+        "completionTokens": 2371,
+        "reasoningTokens": 2242,
+        "cost": 0.000684625
+      }
+    },
+    "httpErrors": 0,
+    "transportErrors": 0,
+    "reportedCost": 0.006068378000000001
+  },
+  "price": {
+    "prompt": 0.0399,
+    "completion": 0.0784
+  },
+  "cost": {
+    "value": 0.006068378000000001,
+    "basis": "openrouter"
+  },
+  "workDir": "the-last-question"
+}

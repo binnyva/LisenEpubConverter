@@ -1,0 +1,16 @@
+{
+  "version": 3,
+  "source": "https://users.ece.cmu.edu/~gamvrosi/thelastq.html",
+  "sourceHash": "3765ae475cbb56f5",
+  "sourceFormat": "html",
+  "completed": {
+    "extract": "2026-11-10T22:41:10.000Z",
+    "metadata": "2026-11-10T22:41:13.129Z",
+    "script": "2026-11-11T10:05:35.749Z"
+  },
+  "chapterCompleted": {
+    "script": {
+      "0": "2026-11-11T10:05:35.749Z"
+    }
+  }
+}

@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { BOOK_STORY_ID, StoriesSchema, type Analysis, type BookMetadata, type Stories, type Story } from '../types.js';
+import { BOOK_STORY_ID, StoriesSchema, type BookMetadata, type Stories, type Story } from '../types.js';
+import { METADATA_FILE } from '../layout.js';
 import type { WorkDir } from '../state.js';
 import { reportWarning } from '../util/warnings.js';
 
@@ -8,11 +9,26 @@ export const STORIES_FILE = 'stories.json';
 
 const pad = (index: number): string => String(index).padStart(2, '0');
 
-/** Narratable chapter indexes in spine order. */
-export function narratableChapters(metadata: BookMetadata, analysis: Analysis): number[] {
+/** Narratable chapter indexes in spine order; none until Metadata has run. */
+export function narratableChapters(metadata: BookMetadata): number[] {
+  const plans = metadata.profile?.chapters ?? [];
   return metadata.chapters
-    .filter((chapter) => analysis.chapters.some((plan) => plan.index === chapter.index && plan.narrate))
+    .filter((chapter) => plans.some((plan) => plan.index === chapter.index && plan.narrate))
     .map((chapter) => chapter.index);
+}
+
+/** The title a chapter is shown and announced under: Metadata's cleaned one when it has one. */
+export function chapterTitle(metadata: BookMetadata, index: number): string {
+  return metadata.profile?.chapters.find((plan) => plan.index === index)?.title.trim()
+    || metadata.chapters.find((chapter) => chapter.index === index)?.title
+    || `Chapter ${index + 1}`;
+}
+
+/** metadata.json once the Metadata stage has added its profile. */
+export function readProfiledMetadata(work: WorkDir): BookMetadata & { profile: NonNullable<BookMetadata['profile']> } {
+  const metadata = work.readJson<BookMetadata>(METADATA_FILE);
+  if (!metadata.profile) throw new Error('Run metadata first: this book has not been profiled yet.');
+  return metadata as BookMetadata & { profile: NonNullable<BookMetadata['profile']> };
 }
 
 /**
@@ -22,12 +38,12 @@ export function narratableChapters(metadata: BookMetadata, analysis: Analysis): 
  * story per narratable chapter; multi-chapter stories are grouped by editing
  * this file.
  */
-export function buildStories(collection: boolean, metadata: BookMetadata, analysis: Analysis): Stories {
-  const chapters = narratableChapters(metadata, analysis);
+export function buildStories(collection: boolean, metadata: BookMetadata): Stories {
+  const chapters = narratableChapters(metadata);
   if (!collection) {
     return { version: 1, collection: false, stories: [{ id: BOOK_STORY_ID, title: metadata.title ?? '', chapters }] };
   }
-  return keepSplitChaptersTogether(proposedStories(metadata, analysis) ?? oneStoryPerChapter(metadata, chapters), metadata);
+  return keepSplitChaptersTogether(proposedStories(metadata) ?? oneStoryPerChapter(metadata, chapters), metadata);
 }
 
 /**
@@ -64,22 +80,22 @@ const storyId = (firstChapter: number): string => `story-${pad(firstChapter)}`;
 
 function storyTitle(metadata: BookMetadata, firstChapter: number, proposed: string): string {
   return proposed.trim()
-    || metadata.chapters.find((chapter) => chapter.index === firstChapter)?.title
-    || `Story ${firstChapter + 1}`;
+    || chapterTitle(metadata, firstChapter);
 }
 
 /**
- * Analyze's grouping, which can span several chapters when a story is
+ * Metadata's grouping, which can span several chapters when a story is
  * published in parts. A proposal that does not cover the narratable chapters
  * exactly once is reported and discarded rather than half-applied.
  */
-function proposedStories(metadata: BookMetadata, analysis: Analysis): Stories | undefined {
-  const narratable = narratableChapters(metadata, analysis);
-  // Analyze decides narration in the same response, and its own backstop can
+function proposedStories(metadata: BookMetadata): Stories | undefined {
+  const narratable = narratableChapters(metadata);
+  const proposed = metadata.profile?.stories ?? [];
+  // Metadata decides narration in the same response, and its own backstop can
   // skip a chapter afterwards. Drop those rather than losing the grouping.
-  const proposal = (analysis.stories ?? [])
+  const proposal = proposed
     .map((story) => [...new Set(story.chapters)].filter((index) => narratable.includes(index)).sort((left, right) => left - right))
-    .map((chapters, position) => ({ chapters, title: analysis.stories![position].title }))
+    .map((chapters, position) => ({ chapters, title: proposed[position].title }))
     .filter((story) => story.chapters.length);
   if (!proposal.length) return undefined;
   const stories: Stories = {
@@ -90,7 +106,7 @@ function proposedStories(metadata: BookMetadata, analysis: Analysis): Stories | 
       .sort((left, right) => left.chapters[0] - right.chapters[0]),
   };
   try {
-    validateStories(stories, metadata, analysis);
+    validateStories(stories, metadata);
   } catch (err) {
     reportWarning(`Ignored the proposed story grouping (${(err as Error).message}) and used one story per chapter.`);
     return undefined;
@@ -103,8 +119,8 @@ function proposedStories(metadata: BookMetadata, analysis: Analysis): Stories | 
  * order. Errors are written for the person editing stories.json or the
  * workspace grouping panel.
  */
-export function validateStories(stories: Stories, metadata: BookMetadata, analysis: Analysis): void {
-  const narratable = narratableChapters(metadata, analysis);
+export function validateStories(stories: Stories, metadata: BookMetadata): void {
+  const narratable = narratableChapters(metadata);
   if (!stories.stories.length) throw new Error('A story grouping needs at least one story.');
   if (!stories.collection && stories.stories.length > 1) {
     throw new Error('A continuous work has one story. Turn on the collection setting to group separate stories.');
@@ -153,13 +169,11 @@ export function readStoriesFile(root: string): Stories | undefined {
   return stories.stories.length ? stories : undefined;
 }
 
-/** Read the saved grouping, falling back to the single book scope for older work folders. */
+/** Read the saved grouping, or derive it when stories.json was removed by hand. */
 export function readStories(work: WorkDir): Stories {
-  return readStoriesFile(work.root) ?? buildStories(
-    work.collection() ?? false,
-    work.readJson<BookMetadata>('metadata.json'),
-    work.readJson<Analysis>('analysis.json'),
-  );
+  const metadata = readProfiledMetadata(work);
+  return readStoriesFile(work.root)
+    ?? buildStories(work.collection() ?? metadata.profile.form === 'short story collection', metadata);
 }
 
 export function writeStories(work: WorkDir, stories: Stories): void {

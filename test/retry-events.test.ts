@@ -1,45 +1,30 @@
 import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PipelineEvent } from '../src/pipeline/runner.js';
 
-const roots: string[] = [];
+const cleanups: Array<() => void> = [];
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.resetModules();
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+  for (const cleanup of cleanups.splice(0)) cleanup();
 });
 
 async function scriptFixture() {
-  const { WorkDir } = await import('../src/state.js');
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lisen-retry-'));
-  roots.push(root);
-  const epubPath = path.join(root, 'book.epub');
-  fs.writeFileSync(epubPath, 'offline fixture');
-  const work = new WorkDir(epubPath, root);
-  work.writeJson('metadata.json', { chapters: [{ index: 0, title: 'Chapter one' }] });
-  work.writeJson('analysis.json', {
-    isFiction: true, summary: 'A story.',
-    characters: [{ name: 'Alice', aliases: [], sex: 'female', age: 'child', importance: 'main' }],
-    chapters: [{ index: 0, narrate: true }],
-  });
-  work.writeJson('chapter-summaries.json', { 0: 'Alice speaks.' });
-  work.writeJson('characters.json', { version: 1, chapters: [0], characters: [
-    { id: 'alice', name: 'Alice', aliases: [], sex: 'female', age: 'child', importance: 'main', chapters: [0], evidence: [], issues: [] },
-  ] });
-  fs.writeFileSync(path.join(work.dir('chapters-clean'), '00.md'), 'Hello.');
-  for (const stage of ['extract', 'analyze', 'chapters', 'list-characters'] as const) work.markDone(stage);
-  return { epubPath, workRoot: root, outDir: path.join(root, 'out'), stage: 'script' as const, rebuild: true };
+  const { bookFixture, removeFixtures } = await import('./helpers.js');
+  cleanups.push(removeFixtures);
+  const { run } = bookFixture({ chapters: ['"Hello," said Alice.'] });
+  return { ...run, onEvent: undefined, stage: 'script' as const, rebuild: true };
 }
 
 const limited = () => new Response(JSON.stringify({ error: { message: 'Provider returned error', code: 429,
   metadata: { raw: 'Model is temporarily rate-limited upstream.' } } }), { status: 429 });
 const success = () => new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({
-  segments: [{ speaker: 'Alice', text: 'Hello.', confidence: 'high' }],
+  labels: [{ id: 1, speaker: 'Alice', confidence: 'high' }],
+  edits: [],
+  characters: [{ name: 'Alice', aliases: [], sex: 'female', age: 'child', named: true, evidence: 'said Alice' }],
 }) } }] }));
 
 describe('script rebuild retry events', () => {
@@ -57,13 +42,15 @@ describe('script rebuild retry events', () => {
     const run = runStage({ ...options, onEvent });
     const outcome = exhausted ? expect(run).rejects.toThrow('(429)') : expect(run).resolves.toMatchObject({ stage: 'script' });
     await vi.advanceTimersByTimeAsync(0);
-    expect(onEvent.mock.calls.map(([event]) => event.type).filter((type) => type !== 'progress')).toEqual(['started', 'warning']);
+    const types = () => onEvent.mock.calls.map(([event]) => event.type).filter((type) => type !== 'progress' && type !== 'usage');
+    expect(types()).toEqual(['started', 'warning']);
     expect(onEvent.mock.calls.find(([event]) => event.type === 'warning')![0]).toMatchObject({ stage: 'script', message: expect.stringContaining('retrying in 2s') });
     expect(onEvent.mock.calls.find(([event]) => event.type === 'warning')![0].message).toContain('rate-limited upstream');
     await vi.runAllTimersAsync();
     await outcome;
-    expect(onEvent.mock.calls.map(([event]) => event.type).filter((type) => type !== 'progress')).toEqual(exhausted
+    expect(types()).toEqual(exhausted
       ? ['started', 'warning', 'warning', 'warning', 'warning'] : ['started', 'warning', 'completed']);
     expect(fetchMock).toHaveBeenCalledTimes(exhausted ? 5 : 2);
+    expect(fs.existsSync(options.workRoot)).toBe(true);
   });
 });

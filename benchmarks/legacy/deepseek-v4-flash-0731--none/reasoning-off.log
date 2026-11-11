@@ -1,0 +1,44 @@
+
+> lisen-epub-convertor@0.1.0 dev
+> tsx src/cli.ts run https://users.ece.cmu.edu/~gamvrosi/thelastq.html extract --work ./work-dryrun/reasoning-off
+
+[extract] Running extract…
+[extract] Opening source document and reading its contents · 0s elapsed
+[extract] Extracting chapter text · 0/1 chapters extracted (0%) · 1s elapsed
+[extract] Extracted The Last Question · 1/1 chapters extracted (100%) · 1s elapsed
+[extract] Chapters, metadata and available cover art saved · 1/1 chapters extracted (100%) · 1s elapsed
+[extract] extract complete.
+[extract] extract usage: no model calls · 1s
+
+> lisen-epub-convertor@0.1.0 dev
+> tsx src/cli.ts run https://users.ece.cmu.edu/~gamvrosi/thelastq.html metadata --work ./work-dryrun/reasoning-off
+
+[metadata] Running metadata…
+[metadata] Reading chapter openings and one prose sample · 0s elapsed
+[metadata] Profiling the book from 1 chapter openings — waiting for model response · 0s elapsed
+[metadata] Checking chapter decisions and saving the profile · 2s elapsed
+[metadata] Profile saved · 2s elapsed
+[metadata] metadata complete.
+[metadata] metadata usage: 1 LLM call · 3,393 prompt + 259 completion tokens · 2s
+
+> lisen-epub-convertor@0.1.0 dev
+> tsx src/cli.ts run https://users.ece.cmu.edu/~gamvrosi/thelastq.html script --work ./work-dryrun/reasoning-off
+
+[script] Running script…
+[script] Chapter 0: "The Last Question" — Preparing script · 0/1 chapters complete · 0s elapsed
+[script] Chapter 0: "The Last Question" — Preparing script · 0/1 chapters complete · 0s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 2/8 (4% of text processed) — waiting for model response · 0/1 chapters complete · 0s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 3/8 (30% of text processed) — waiting for model response · 0/1 chapters complete · 3s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 4/8 (49% of text processed) — waiting for model response · 0/1 chapters complete · 7s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 4/8 (49% of text processed) — waiting for model response · 0/1 chapters complete · 10s elapsed
+[script] Chapter 1, block 4: skipped 2 cleanup edit(s) and kept the source text there ("This GaIaxy": not found in the text; "INSUFICIENT": not found in the text).
+[script] Chapter 0: "The Last Question" — Scripting block 5/8 (65% of text processed) — waiting for model response · 0/1 chapters complete · 11s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 6/8 (83% of text processed) — waiting for model response · 0/1 chapters complete · 16s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 6/8 (83% of text processed) — waiting for model response · 0/1 chapters complete · 20s elapsed
+[script] Chapter 1, block 6: 2 label(s) for narration, unknown or repeated spans were ignored.
+[script] Chapter 0: "The Last Question" — Scripting block 7/8 (92% of text processed) — waiting for model response · 0/1 chapters complete · 20s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 8/8 (95% of text processed) — waiting for model response · 0/1 chapters complete · 21s elapsed
+[script] Chapter 0: "The Last Question" — Blocks complete. Verifying 50 speaker assignment(s) · 0/1 chapters complete · 22s elapsed
+[script] script usage: 12 LLM calls · 28,950 prompt + 4,797 completion tokens · 29s
+
+Error: New or unresolved speakers in chapter 1: Jerrodd, Jerrodine, Zee Prime, Dee Sub Wun, Universal AC. They are listed under "unresolved" in characters.json and in the workspace's Cast panel. For each, add the character, or set "resolveAs" to an existing character's name or to "narrator", then run Script again: the attributed text is kept and is not paid for twice.

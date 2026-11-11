@@ -1,0 +1,12 @@
+{
+  "label": "baseline",
+  "createdAt": "2026-11-11T15:37:48.743Z",
+  "version": {
+    "commit": "920e654cb81a790ea18cb7b163a3f9f60a61b67d",
+    "branch": "new-flow",
+    "dirty": true,
+    "packageVersion": "0.1.0",
+    "sourceHash": "a5336e00992be66f",
+    "baseStagesHash": "926c46558f6d2a94"
+  }
+}

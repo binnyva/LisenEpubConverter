@@ -1,0 +1,69 @@
+{
+  "label": "baseline",
+  "model": "x-ai/grok-4.7",
+  "effort": "low",
+  "repeat": 1,
+  "version": {
+    "commit": "920e654cb81a790ea18cb7b163a3f9f60a61b67d",
+    "branch": "new-flow",
+    "dirty": true,
+    "packageVersion": "0.1.0",
+    "sourceHash": "a5336e00992be66f",
+    "baseStagesHash": "926c46558f6d2a94"
+  },
+  "tunables": {
+    "scriptChunkChars": 16000,
+    "scriptUnquotedChunkChars": 6000,
+    "scriptMaxQuotesPerChunk": 120,
+    "scriptVerificationBatchSize": 12,
+    "narrationMergeChars": 1500,
+    "llmConcurrency": 3,
+    "scriptMaxCompletionTokens": "65536",
+    "llmResponseTimeoutMs": "600000",
+    "llmMaxRetries": 5
+  },
+  "startedAt": "2026-11-11T17:13:49.111Z",
+  "finishedAt": "2026-11-11T17:16:18.038Z",
+  "wallMs": 148925,
+  "exitCode": 1,
+  "outcome": "blocked",
+  "reason": "New or unresolved speakers in chapter 1: Jerrodette I and Jerrodette II. They are listed under \"unresolved\" in characters.json and in the workspace's Cast panel. For each, add the character, or set \"resolveAs\" to an existing character's name or to \"narrator\", then run Script again: the attributed text is kept and is not paid for twice.",
+  "usage": {
+    "calls": 8,
+    "promptTokens": 31215,
+    "completionTokens": 14091,
+    "reasoningTokens": 10198
+  },
+  "retries": 0,
+  "validationFailures": 0,
+  "calls": {
+    "byType": {
+      "attribution": {
+        "calls": 7,
+        "promptTokens": 29105,
+        "completionTokens": 13150,
+        "reasoningTokens": 9283,
+        "cost": 0.125014
+      },
+      "verification": {
+        "calls": 1,
+        "promptTokens": 2110,
+        "completionTokens": 941,
+        "reasoningTokens": 915,
+        "cost": 0.008138
+      }
+    },
+    "httpErrors": 0,
+    "transportErrors": 0,
+    "reportedCost": 0.133152
+  },
+  "price": {
+    "prompt": 2,
+    "completion": 6
+  },
+  "cost": {
+    "value": 0.133152,
+    "basis": "openrouter"
+  },
+  "workDir": "the-last-question"
+}

@@ -1,0 +1,27 @@
+[
+  {
+    "runId": "script-2026-11-11T16:06:12.061Z",
+    "stage": "script",
+    "startedAt": "2026-11-11T16:06:12.061Z",
+    "wallMs": 170207,
+    "outcome": "completed",
+    "llm": {
+      "calls": 10,
+      "promptTokens": 24628,
+      "completionTokens": 38011,
+      "reasoningTokens": 32374
+    },
+    "models": {
+      "deepseek/deepseek-v4.1-flash-1017": {
+        "calls": 10,
+        "promptTokens": 24628,
+        "completionTokens": 38011,
+        "reasoningTokens": 32374
+      }
+    },
+    "tts": {
+      "calls": 0,
+      "characters": 0
+    }
+  }
+]

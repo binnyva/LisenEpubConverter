@@ -1,0 +1,27 @@
+[
+  {
+    "runId": "script-2026-11-11T17:12:03.774Z",
+    "stage": "script",
+    "startedAt": "2026-11-11T17:12:03.774Z",
+    "wallMs": 1363884,
+    "outcome": "completed",
+    "llm": {
+      "calls": 7,
+      "promptTokens": 23626,
+      "completionTokens": 81230,
+      "reasoningTokens": 77015
+    },
+    "models": {
+      "google/gemini-4-carbon": {
+        "calls": 7,
+        "promptTokens": 23626,
+        "completionTokens": 81230,
+        "reasoningTokens": 77015
+      }
+    },
+    "tts": {
+      "calls": 0,
+      "characters": 0
+    }
+  }
+]

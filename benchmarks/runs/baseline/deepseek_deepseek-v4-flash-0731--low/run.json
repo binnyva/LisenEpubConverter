@@ -1,0 +1,68 @@
+{
+  "label": "baseline",
+  "model": "deepseek/deepseek-v4-flash-0731",
+  "effort": "low",
+  "repeat": 1,
+  "version": {
+    "commit": "920e654cb81a790ea18cb7b163a3f9f60a61b67d",
+    "branch": "new-flow",
+    "dirty": true,
+    "packageVersion": "0.1.0",
+    "sourceHash": "a5336e00992be66f",
+    "baseStagesHash": "926c46558f6d2a94"
+  },
+  "tunables": {
+    "scriptChunkChars": 16000,
+    "scriptUnquotedChunkChars": 6000,
+    "scriptMaxQuotesPerChunk": 120,
+    "scriptVerificationBatchSize": 12,
+    "narrationMergeChars": 1500,
+    "llmConcurrency": 3,
+    "scriptMaxCompletionTokens": "65536",
+    "llmResponseTimeoutMs": "600000",
+    "llmMaxRetries": 5
+  },
+  "startedAt": "2026-11-11T15:44:34.633Z",
+  "finishedAt": "2026-11-11T15:51:43.463Z",
+  "wallMs": 428825,
+  "exitCode": 0,
+  "outcome": "completed",
+  "usage": {
+    "calls": 9,
+    "promptTokens": 23098,
+    "completionTokens": 50035,
+    "reasoningTokens": 44591
+  },
+  "retries": 0,
+  "validationFailures": 1,
+  "calls": {
+    "byType": {
+      "attribution": {
+        "calls": 8,
+        "promptTokens": 21855,
+        "completionTokens": 49144,
+        "reasoningTokens": 43804,
+        "cost": 0.015870321
+      },
+      "verification": {
+        "calls": 1,
+        "promptTokens": 1243,
+        "completionTokens": 891,
+        "reasoningTokens": 787,
+        "cost": 0.0004235
+      }
+    },
+    "httpErrors": 0,
+    "transportErrors": 0,
+    "reportedCost": 0.016293821
+  },
+  "price": {
+    "prompt": 0.0434,
+    "completion": 0.3
+  },
+  "cost": {
+    "value": 0.016293821,
+    "basis": "openrouter"
+  },
+  "workDir": "the-last-question"
+}

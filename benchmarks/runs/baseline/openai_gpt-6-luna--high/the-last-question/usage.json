@@ -1,0 +1,27 @@
+[
+  {
+    "runId": "script-2026-11-11T15:41:07.553Z",
+    "stage": "script",
+    "startedAt": "2026-11-11T15:41:07.553Z",
+    "wallMs": 63455,
+    "outcome": "completed",
+    "llm": {
+      "calls": 7,
+      "promptTokens": 19071,
+      "completionTokens": 12262,
+      "reasoningTokens": 9228
+    },
+    "models": {
+      "openai/gpt-6-luna": {
+        "calls": 7,
+        "promptTokens": 19071,
+        "completionTokens": 12262,
+        "reasoningTokens": 9228
+      }
+    },
+    "tts": {
+      "calls": 0,
+      "characters": 0
+    }
+  }
+]

@@ -1,0 +1,48 @@
+{
+  "title": "The Last Question",
+  "author": "Isaac Asimov",
+  "language": "en",
+  "subjects": [],
+  "description": "",
+  "chapters": [
+    {
+      "index": 0,
+      "id": "source",
+      "title": "The Last Question",
+      "file": "0-chapters/00-the-last-question.md",
+      "words": 4451,
+      "isNav": false
+    }
+  ],
+  "profile": {
+    "recognised": true,
+    "summary": "The Last Question is a classic science fiction short story by Isaac Asimov, first published in 1956. It follows the repeated question of whether entropy can be reversed, posed to successive generations of increasingly powerful computers—from Multivac to Microvac to Galactic AC to Universal AC—across the vast span of cosmic time, as humanity evolves and spreads across the universe. The story is known for its philosophical depth and its famous, haunting final line.",
+    "author": {
+      "sex": "male",
+      "race": "white",
+      "age": "adult",
+      "country": "USA"
+    },
+    "isFiction": true,
+    "form": "short story",
+    "genres": [
+      "science fiction",
+      "philosophical fiction"
+    ],
+    "narrator": {
+      "pointOfView": "third",
+      "sex": "unknown"
+    },
+    "dialogueStyle": "quoted",
+    "chapters": [
+      {
+        "index": 0,
+        "title": "The Last Question",
+        "narrate": true,
+        "reason": "Body of the story"
+      }
+    ],
+    "stories": [],
+    "summarySource": "model"
+  }
+}

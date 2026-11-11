@@ -14,6 +14,10 @@ export interface ParsedEpub {
   title: string;
   author: string;
   language: string;
+  /** dc:subject entries. */
+  subjects: string[];
+  /** dc:description as plain text; often the publisher's blurb. */
+  description: string;
   spine: SpineItem[];
   /** href (relative to OPF) -> title, from the navigation document / NCX. */
   tocTitles: Map<string, string>;
@@ -64,6 +68,9 @@ export function parseEpub(epubPath: string): ParsedEpub {
   const title = textOf(meta.title) || path.basename(epubPath, '.epub');
   const author = textOf(meta.creator) || 'Unknown';
   const language = textOf(meta.language) || 'en';
+  const subjects = asArray<unknown>(meta.subject).map((subject) => textOf(subject).trim()).filter(Boolean);
+  // Blurbs are commonly stored as escaped HTML.
+  const description = cheerio.load(textOf(meta.description)).text().replace(/\s+/g, ' ').trim();
 
   interface ManifestItem {
     id: string;
@@ -146,5 +153,5 @@ export function parseEpub(epubPath: string): ParsedEpub {
   }
   if (spine.length === 0) throw new Error('EPUB has no readable chapters in its spine');
 
-  return { title, author, language, spine, tocTitles, cover };
+  return { title, author, language, subjects, description, spine, tocTitles, cover };
 }

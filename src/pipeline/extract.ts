@@ -6,14 +6,14 @@ import { reportProgress } from '../util/progress.js';
 import { readSource, type SourceMetadataOverrides } from '../source/read.js';
 import { splitOversizedChapter } from '../source/split.js';
 import { config } from '../config.js';
+import { CHAPTERS_DIR, METADATA_FILE, chapterFileName } from '../layout.js';
 
 /** Stage 1: source document -> one markdown file per chapter + metadata.json + cover. */
 export async function runExtract(sourcePath: string, work: WorkDir, overrides?: SourceMetadataOverrides): Promise<BookMetadata> {
   reportProgress({ activity: 'Opening source document and reading its contents' });
   const source = await readSource(sourcePath, overrides);
-  const chaptersDir = work.dir('chapters');
-  fs.rmSync(chaptersDir, { recursive: true, force: true });
-  work.dir('chapters');
+  fs.rmSync(work.path(CHAPTERS_DIR), { recursive: true, force: true });
+  work.dir(CHAPTERS_DIR);
 
   const chapters: ExtractedChapter[] = [];
   // A source can deliver a whole part of a novel, or a whole book, as one
@@ -36,13 +36,7 @@ export async function runExtract(sourcePath: string, work: WorkDir, overrides?: 
   items.forEach((item, index) => {
     const title = item.title;
 
-    const slug =
-      title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-|-$/g, '')
-        .slice(0, 40) || 'section';
-    const file = `chapters/${String(index).padStart(2, '0')}-${slug}.md`;
+    const file = `${CHAPTERS_DIR}/${chapterFileName(index, title, '.md')}`;
     fs.writeFileSync(work.path(file), item.markdown);
 
     chapters.push({
@@ -67,10 +61,12 @@ export async function runExtract(sourcePath: string, work: WorkDir, overrides?: 
     title: source.title,
     author: source.author,
     language: source.language,
+    subjects: source.subjects,
+    description: source.description,
     coverFile,
     chapters,
   };
-  work.writeJson('metadata.json', metadata);
+  work.writeJson(METADATA_FILE, metadata);
   if (source.contentHash) work.recordDownloadedSourceHash(source.contentHash);
   reportProgress({ activity: 'Chapters, metadata and available cover art saved', phase: 'completed', completedUnits: chapters.length, totalUnits: chapters.length, unit: 'chapters extracted' });
   return metadata;

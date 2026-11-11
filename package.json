@@ -10,7 +10,8 @@
     "build": "tsc",
     "dev": "tsx src/cli.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "bench": "tsx src/benchmark/cli.ts"
   },
   "engines": {
     "node": ">=20"

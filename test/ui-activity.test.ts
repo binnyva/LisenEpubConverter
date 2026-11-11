@@ -40,12 +40,12 @@ describe('UI stage activity', () => {
     const source = fs.readFileSync(new URL('../src/ui/server.ts', import.meta.url), 'utf8');
     expect(source).toContain('<input type="checkbox" id="script-reasoning-enabled"');
     const { nodes, context } = browser();
-    vm.runInContext(`modelSettings={provider:'openai',model:'text-model',scriptModel:'',scriptReasoningEffort:'high',models:[],modelsFile:'models.json',audio:{provider:'openai',model:'audio-model',models:[],modelsFile:'audio.json'}};book={analysis:{isFiction:false}};renderModelSettings()`, context);
+    vm.runInContext(`modelSettings={provider:'openai',model:'text-model',scriptModel:'',scriptReasoningEffort:'high',models:[],modelsFile:'models.json',audio:{provider:'openai',model:'audio-model',models:[],modelsFile:'audio.json'}};book={metadata:{profile:{isFiction:false}}};renderModelSettings()`, context);
     expect(nodes.get('#script-reasoning-enabled')).toMatchObject({ checked: false, disabled: true });
     expect(nodes.get('#script-reasoning-effort').disabled).toBe(true);
     expect(vm.runInContext('selectedLlm().scriptReasoningEffort', context)).toBe('none');
 
-    vm.runInContext('book.analysis.isFiction=true;renderModelSettings()', context);
+    vm.runInContext('book.metadata.profile.isFiction=true;renderModelSettings()', context);
     expect(nodes.get('#script-reasoning-enabled')).toMatchObject({ checked: true, disabled: false });
     expect(nodes.get('#script-reasoning-effort')).toMatchObject({ value: 'high', disabled: false });
     expect(vm.runInContext('selectedLlm().scriptReasoningEffort', context)).toBe('high');
@@ -55,7 +55,7 @@ describe('UI stage activity', () => {
 
   it('offers a close-task control only while a task is active', () => {
     const { nodes, context } = browser();
-    context.current = { id: 'activity-1', epubPath: '/book.epub', stage: 'analyze', status: 'running', events: [] };
+    context.current = { id: 'activity-1', epubPath: '/book.epub', stage: 'metadata', status: 'running', events: [] };
     vm.runInContext('renderJob(current)', context);
     expect(nodes.get('#close-task')).toMatchObject({ hidden: false, textContent: 'Close task' });
 
@@ -68,11 +68,11 @@ describe('UI stage activity', () => {
 
   it('shows indeterminate model work, measured audio units, and clears stale percentages for export', () => {
     const { nodes, context } = browser();
-    context.current = { id: 'activity-1', epubPath: '/book.epub', stage: 'analyze', status: 'running',
+    context.current = { id: 'activity-1', epubPath: '/book.epub', stage: 'metadata', status: 'running',
       startedAt: Date.now() - 20000, progressUpdatedAt: Date.now() - 5000, events: [],
       progress: { activity: 'Analyzing sampled text — waiting for model response', elapsedMs: 15000 } };
     vm.runInContext('renderJob(current)', context);
-    expect(nodes.get('#progress-title').textContent).toBe('Analyze');
+    expect(nodes.get('#progress-title').textContent).toBe('Metadata');
     expect(nodes.get('#progress-bar').hidden).toBe(false);
     expect(nodes.get('#progress-bar').value).toBeUndefined();
     expect(nodes.get('#progress-phase').textContent).toContain('waiting for model response · 20s elapsed');
@@ -102,7 +102,7 @@ describe('UI stage activity', () => {
     expect(nodes.get('#progress-title').textContent).toBe('Chapter 3: <Alice>');
     expect(nodes.get('#progress-bar').value).toBe(72);
     expect(nodes.get('#progress-text').textContent).toBe('72% of text processed');
-    expect(nodes.get('#progress-phase').textContent).toContain('Attributing block 2/2 · 15s elapsed');
+    expect(nodes.get('#progress-phase').textContent).toContain('Scripting block 2/2 · 15s elapsed');
     expect(nodes.get('#progress-chapters').textContent).toBe('0/2 chapters complete');
     vm.runInContext("current.progress.phase='verifying';current.progress.processedChars=11000;current.progress.ambiguousSegments=4;renderJob(current)", context);
     expect(nodes.get('#progress-bar').value).toBe(100);
@@ -115,23 +115,67 @@ describe('UI stage activity', () => {
     expect(nodes.get('#chapter-progress').hidden).toBe(true);
   });
 
-  it('shows List Characters between Chapters and Script and renders discoveries safely', () => {
+  it('lists the seven stages and renders the profile, cast and usage safely', () => {
     const { nodes, context } = browser();
     expect(Array.from(vm.runInContext('stages', context))).toEqual([...STAGES]);
     context.currentBook = {
-      epubPath: '/book.epub', epubAvailable: true, metadata: { title: 'Book' },
-      state: { completed: { chapters: 'done' } }, chapters: [],
-      characterObservations: [{ index: 4, observations: [{ name: '<Alice>', aliases: [], sex: 'unknown', age: 'unknown', country: 'unknown', evidence: '<quoted evidence>', confidence: 'low' }] }],
+      sourcePath: '/book.epub', sourceAvailable: true, state: { completed: { extract: 'done' } }, chapters: [],
+      metadata: { title: 'Book', profile: {
+        recognised: false, summary: '<blurb>', summarySource: 'blurb', isFiction: true, form: 'novel', genres: ['mystery'],
+        author: { sex: 'female', age: 'unknown', race: 'unknown', country: 'Ireland' }, narrator: { pointOfView: 'first', sex: 'female' },
+        dialogueStyle: 'unquoted', dialogueStyleNote: 'The text has 0.1 double-quote pairs per 1,000 words.',
+        chapters: [{ index: 0, title: '<One>', narrate: true, reason: 'body' }, { index: 1, title: 'Index', narrate: false, reason: 'index' }],
+      } },
+      characterRegistry: {
+        characters: [{ id: 'a', name: '<Alice>', story: 'book', aliases: [], sex: 'female', age: 'child', named: true, chapters: [4], evidence: [{ chapter: 4, chunk: 0, text: '<quoted evidence>' }], issues: ['Conflicting sex: female / male.'] }],
+        unresolved: [{ story: 'book', chapter: 6, speaker: '<a voice>', samples: [] }, { story: 'book', chapter: 7, speaker: 'answered', samples: [], resolveAs: '<Alice>' }],
+      },
+      usage: [
+        { runId: 'r', stage: 'metadata', outcome: 'completed', wallMs: 4000, llm: { calls: 1, promptTokens: 9000, completionTokens: 400, reasoningTokens: 0 }, tts: { calls: 0, characters: 0 } },
+        { runId: 'r', stage: 'script', outcome: 'failed', wallMs: 60000, llm: { calls: 10, promptTokens: 50000, completionTokens: 2000, reasoningTokens: 500 }, tts: { calls: 0, characters: 0 } },
+        { runId: 's', stage: 'script', outcome: 'completed', wallMs: 65000, llm: { calls: 2, promptTokens: 1000, completionTokens: 100, reasoningTokens: 0 }, tts: { calls: 0, characters: 0 } },
+      ],
     };
     vm.runInContext('book=currentBook;render()', context);
-    expect(nodes.get('#stages').innerHTML).toContain('List Characters');
-    expect(nodes.get('#character-status').textContent).toContain('1 chapters scanned');
-    expect(nodes.get('#characters').innerHTML).toContain('&lt;Alice&gt;');
-    expect(nodes.get('#characters').innerHTML).toContain('chapters 5');
-    expect(nodes.get('#characters').innerHTML).toContain('Needs review');
-    vm.runInContext("book.state.completed['list-characters']='done';book.characterRegistry={characters:[]};renderCharacters()", context);
-    expect(nodes.get('#character-status').textContent).toBe('Book character registry · 0 characters');
-    expect(nodes.get('#characters').innerHTML).toContain('Review and edit registry');
+    const stageMarkup = nodes.get('#stages').innerHTML;
+    expect(stageMarkup).toContain('Profile the book in one call');
+    expect(stageMarkup).toContain('One pass over the text');
+    expect(stageMarkup).not.toMatch(/analy[sz]e|List Characters/i);
+
+    const profile = nodes.get('#profile').innerHTML;
+    expect(profile).toContain('novel · mystery');
+    expect(profile).toContain('first person · narrator female');
+    expect(profile).toContain('Script asks the model for the segments');
+    expect(profile).toContain('0.1 double-quote pairs');
+    expect(profile).toContain('Summary (from the source blurb)');
+    expect(profile).toContain('&lt;blurb&gt;');
+    expect(profile).toContain('1 narrated of 2');
+    expect(profile).toContain('&lt;One&gt;');
+
+    expect(nodes.get('#character-status').textContent).toBe('1 character · 1 unresolved speaker blocking Script · 1 with notes for review');
+    const cast = nodes.get('#characters').innerHTML;
+    expect(cast).toContain('Review and edit the cast');
+    expect(cast).toContain('&lt;Alice&gt;');
+    expect(cast).toContain('chapters 5');
+    expect(cast).toContain('&lt;quoted evidence&gt;');
+    expect(cast).toContain('Unresolved in chapter 7: &lt;a voice&gt;');
+    expect(cast).not.toContain('answered');
+
+    const usage = nodes.get('#usage').innerHTML;
+    expect(usage).toContain('<th scope="row">metadata</th><td>1</td><td>1</td><td>9,000</td><td>400</td><td>0</td><td>0</td><td>4s</td>');
+    expect(usage).toContain('<th scope="row">script</th><td>2</td><td>12</td><td>51,000</td><td>2,100</td><td>500</td><td>0</td><td>2m 05s</td>');
+    expect(usage).toContain('<th scope="row">total</th><td>3</td><td>13</td><td>60,000</td>');
+    expect(usage).toContain('Last: script · completed');
+  });
+
+  it('prompts for Metadata and Script before they have run, and explains an outdated folder', () => {
+    const { nodes, context } = browser();
+    vm.runInContext("book={sourcePath:'/book.epub',sourceAvailable:true,state:{completed:{}},chapters:[],metadata:{title:'Book'},usage:[]};render()", context);
+    expect(nodes.get('#profile').innerHTML).toContain('Run Metadata to profile the book.');
+    expect(nodes.get('#character-status').textContent).toContain('Run Script to discover who speaks');
+    expect(nodes.get('#usage').innerHTML).toContain('No stage has run yet.');
+    vm.runInContext("book={sourcePath:'/book.epub',sourceAvailable:true,state:{completed:{}},chapters:[],usage:[],outdated:'Rebuild it from Extract <now>.'};render()", context);
+    expect(nodes.get('#profile').innerHTML).toContain('Rebuild it from Extract &lt;now&gt;.');
   });
 
   it('renders conflicting character details as selectable choices', () => {
@@ -151,23 +195,39 @@ describe('UI stage activity', () => {
     expect(nodes.get('#show-blocking-character-issues').attributes['aria-pressed']).toBe('true');
   });
 
-  it('offers an unresolved speaker a match-or-add resolution in the character dialog', () => {
+  it('offers an unresolved speaker a match, add or narrator resolution in the cast dialog', () => {
     const { context } = browser();
-    vm.runInContext("candidateResolutions={};book={chapters:[{index:12,title:'Sacks'}],characterCandidates:[],characterRegistry:{characters:[{id:'alice',name:'Alice',chapters:[12]}]}}", context);
-    const markup = vm.runInContext("candidateMarkup({key:'candidate-poem-fury',speaker:'Poem Fury',chapters:[4],samples:[]},book.characterRegistry)", context);
+    vm.runInContext("candidateResolutions={};book={chapters:[{index:12,title:'Sacks'}],characterRegistry:{characters:[{id:'alice',name:'Alice',story:'book',chapters:[12]},{id:'bob',name:'Bob',story:'story-09',chapters:[2]}],unresolved:[{story:'book',chapter:4,speaker:'Poem Fury',samples:[{text:'\"Mine!\"',context:'>> [Poem Fury] \"Mine!\"'}]}]}}", context);
+    const markup = vm.runInContext('candidateMarkup(unresolvedCandidates()[0],book.characterRegistry)', context);
+    expect(markup).toContain('data-key="4:poem fury"');
     expect(markup).toContain('Unresolved speaker: Poem Fury');
     expect(markup).toContain('Add Poem Fury as a new character');
+    expect(markup).toContain('Not speech: give it to the narrator');
     expect(markup).toContain("C 13: Alice (from Chapter &#39;Sacks&#39;)");
+    // Only the cast of the speaker's own story is offered.
+    expect(markup).not.toContain('Bob');
+    expect(markup).toContain('&gt;&gt; [Poem Fury]');
+  });
+
+  it('turns resolutions into a chapter-scoped answer or a new character, never an alias', () => {
+    const { context } = browser();
+    vm.runInContext("book={chapters:[],characterRegistry:{characters:[{id:'alice',name:'Alice',story:'book',aliases:[],chapters:[1]}],unresolved:[{story:'book',chapter:4,speaker:'a voice',samples:[]},{story:'book',chapter:5,speaker:'the porter',samples:[{text:'Sir?'}]},{story:'book',chapter:6,speaker:'sign',samples:[]}]}};candidateResolutions={'4:a voice':'alice','5:the porter':'new','6:sign':'narrator'}", context);
+    const registry = JSON.parse(vm.runInContext('JSON.stringify(applyCandidateResolutions(JSON.parse(JSON.stringify(book.characterRegistry))))', context));
+    expect(registry.unresolved.map((record: any) => record.resolveAs)).toEqual(['Alice', undefined, 'narrator']);
+    expect(registry.characters[0].aliases).toEqual([]);
+    expect(registry.characters[1]).toMatchObject({ name: 'the porter', story: 'book', chapters: [5], evidence: [{ chapter: 5, text: 'Sir?' }] });
+    expect(vm.runInContext('unresolvedCandidateCount()', context)).toBe(0);
   });
 
   it('preselects supported LLM speaker proposals but leaves unsupported ones unresolved', () => {
     const { context } = browser();
-    vm.runInContext("book={characterCandidates:[],characterRegistry:{characters:[{id:'alice',name:'Alice'}]}}", context);
-    vm.runInContext("applySpeakerSuggestions([{key:'candidate-fellow',resolution:'existing',characterId:'alice',reason:'Explicit dialogue tag.',evidence:'Alice said.'},{key:'candidate-girl',resolution:'new',reason:'A distinct role speaks.',evidence:'the girl said'},{key:'candidate-unknown',resolution:'unresolved',reason:'No support.',evidence:''}])", context);
-    expect(vm.runInContext('candidateResolutions["candidate-fellow"]', context)).toBe('alice');
-    expect(vm.runInContext('candidateResolutions["candidate-girl"]', context)).toBe('new');
-    expect(vm.runInContext('candidateResolutions["candidate-unknown"]', context)).toBeUndefined();
-    expect(vm.runInContext('candidateSuggestions["candidate-fellow"].reason', context)).toBe('Explicit dialogue tag.');
+    vm.runInContext("book={characterRegistry:{characters:[{id:'alice',name:'Alice'}],unresolved:[]}}", context);
+    vm.runInContext("applySpeakerSuggestions([{key:'4:fellow',resolution:'existing',character:'Alice',reason:'Explicit dialogue tag.',evidence:'Alice said.'},{key:'5:girl',resolution:'new',reason:'A distinct role speaks.',evidence:'the girl said'},{key:'6:unknown',resolution:'unresolved',reason:'No support.',evidence:''},{key:'7:ghost',resolution:'existing',character:'Nobody',reason:'',evidence:''}])", context);
+    expect(vm.runInContext('candidateResolutions["4:fellow"]', context)).toBe('alice');
+    expect(vm.runInContext('candidateResolutions["5:girl"]', context)).toBe('new');
+    expect(vm.runInContext('candidateResolutions["6:unknown"]', context)).toBeUndefined();
+    expect(vm.runInContext('candidateResolutions["7:ghost"]', context)).toBeUndefined();
+    expect(vm.runInContext('candidateSuggestions["4:fellow"].reason', context)).toBe('Explicit dialogue tag.');
   });
 
   it('offers LLM reconciliation directly beside an unresolved Script failure', () => {
@@ -182,7 +242,7 @@ describe('UI stage activity', () => {
 
   it('resumes Script at the first chapter with an unresolved speaker', () => {
     const { context } = browser();
-    vm.runInContext("book={characterCandidates:[{chapters:[8]},{chapters:[4,7]}]}", context);
+    vm.runInContext("book={characterRegistry:{characters:[],unresolved:[{chapter:8,speaker:'a'},{chapter:4,speaker:'b'},{chapter:7,speaker:'c'}]}}", context);
     expect(vm.runInContext('resumeFromCandidateChapter()', context)).toBe(4);
   });
 

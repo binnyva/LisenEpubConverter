@@ -1,0 +1,61 @@
+{
+  "label": "baseline",
+  "model": "mistralai/mistral-large-4-0",
+  "effort": "low",
+  "repeat": 1,
+  "version": {
+    "commit": "920e654cb81a790ea18cb7b163a3f9f60a61b67d",
+    "branch": "new-flow",
+    "dirty": true,
+    "packageVersion": "0.1.0",
+    "sourceHash": "a5336e00992be66f",
+    "baseStagesHash": "926c46558f6d2a94"
+  },
+  "tunables": {
+    "scriptChunkChars": 16000,
+    "scriptUnquotedChunkChars": 6000,
+    "scriptMaxQuotesPerChunk": 120,
+    "scriptVerificationBatchSize": 12,
+    "narrationMergeChars": 1500,
+    "llmConcurrency": 3,
+    "scriptMaxCompletionTokens": "65536",
+    "llmResponseTimeoutMs": "600000",
+    "llmMaxRetries": 5
+  },
+  "startedAt": "2026-11-11T17:22:48.081Z",
+  "finishedAt": "2026-11-11T17:29:15.812Z",
+  "wallMs": 387728,
+  "exitCode": 0,
+  "outcome": "completed",
+  "usage": {
+    "calls": 7,
+    "promptTokens": 21138,
+    "completionTokens": 46595,
+    "reasoningTokens": 42340
+  },
+  "retries": 0,
+  "validationFailures": 0,
+  "calls": {
+    "byType": {
+      "attribution": {
+        "calls": 7,
+        "promptTokens": 21138,
+        "completionTokens": 46595,
+        "reasoningTokens": 42340,
+        "cost": 0.11325629
+      }
+    },
+    "httpErrors": 0,
+    "transportErrors": 0,
+    "reportedCost": 0.11325629
+  },
+  "price": {
+    "prompt": 0.7,
+    "completion": 2.0999999999999996
+  },
+  "cost": {
+    "value": 0.11325629,
+    "basis": "openrouter"
+  },
+  "workDir": "the-last-question"
+}

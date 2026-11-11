@@ -1,0 +1,27 @@
+[
+  {
+    "runId": "script-2026-11-11T17:22:48.716Z",
+    "stage": "script",
+    "startedAt": "2026-11-11T17:22:48.716Z",
+    "wallMs": 387051,
+    "outcome": "completed",
+    "llm": {
+      "calls": 7,
+      "promptTokens": 21138,
+      "completionTokens": 46595,
+      "reasoningTokens": 42340
+    },
+    "models": {
+      "mistralai/mistral-large-4-0": {
+        "calls": 7,
+        "promptTokens": 21138,
+        "completionTokens": 46595,
+        "reasoningTokens": 42340
+      }
+    },
+    "tts": {
+      "calls": 0,
+      "characters": 0
+    }
+  }
+]

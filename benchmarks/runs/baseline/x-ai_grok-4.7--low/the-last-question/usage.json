@@ -1,0 +1,27 @@
+[
+  {
+    "runId": "script-2026-11-11T17:13:49.714Z",
+    "stage": "script",
+    "startedAt": "2026-11-11T17:13:49.714Z",
+    "wallMs": 148295,
+    "outcome": "failed",
+    "llm": {
+      "calls": 8,
+      "promptTokens": 31215,
+      "completionTokens": 14091,
+      "reasoningTokens": 10198
+    },
+    "models": {
+      "x-ai/grok-4.7": {
+        "calls": 8,
+        "promptTokens": 31215,
+        "completionTokens": 14091,
+        "reasoningTokens": 10198
+      }
+    },
+    "tts": {
+      "calls": 0,
+      "characters": 0
+    }
+  }
+]

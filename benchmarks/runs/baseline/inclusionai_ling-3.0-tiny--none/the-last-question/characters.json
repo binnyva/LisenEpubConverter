@@ -1,0 +1,106 @@
+{
+  "version": 3,
+  "stories": [
+    {
+      "id": "book",
+      "title": "The Last Question"
+    }
+  ],
+  "characters": [
+    {
+      "id": "char-188db5cdc3a6f230",
+      "name": "Alexander Adell",
+      "story": "book",
+      "aliases": [
+        "Adell"
+      ],
+      "sex": "male",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 0,
+          "text": "Don't shout. When the sun is done, the other stars will be gone, too."
+        },
+        {
+          "chapter": 0,
+          "chunk": 2,
+          "text": "Space is infinite."
+        },
+        {
+          "chapter": 0,
+          "chunk": 3,
+          "text": "I am Zee Prime."
+        },
+        {
+          "chapter": 0,
+          "chunk": 4,
+          "text": "WHEN WILL YOU HAVE ENOUGH DATA TO ANSWER THE QUESTION?"
+        },
+        {
+          "chapter": 0,
+          "chunk": 5,
+          "text": "We shall wait."
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-cbc985851ccbf045",
+      "name": "Bertram Lupov",
+      "story": "book",
+      "aliases": [
+        "Lupov"
+      ],
+      "sex": "male",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 0,
+          "text": "Ten billion years isn't forever."
+        },
+        {
+          "chapter": 0,
+          "chunk": 2,
+          "text": "I'm still under two hundred."
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-ea4d9e0d9cbf6097",
+      "name": "AC",
+      "story": "book",
+      "aliases": [],
+      "sex": "unknown",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 5,
+          "text": "THERE IS AS YET INSUFFICIENT DATA FOR A MEANINGFUL ANSWER."
+        },
+        {
+          "chapter": 0,
+          "chunk": 6,
+          "text": "Let there be light!"
+        }
+      ],
+      "issues": []
+    }
+  ],
+  "unresolved": []
+}

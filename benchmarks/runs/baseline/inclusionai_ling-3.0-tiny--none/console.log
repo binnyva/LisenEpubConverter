@@ -1,0 +1,25 @@
+[script] Running script…
+[script] Chapter 0: "The Last Question" — Preparing script · 0/1 chapters complete · 0s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 1/7 (0% of text processed) — waiting for model response · 0/1 chapters complete · 0s elapsed
+[script] Chapter 1, block 1: 2 quoted span(s) came back without a speaker and go to verification; 15 label(s) for narration, unknown or repeated spans were ignored.
+[script] Chapter 0: "The Last Question" — Scripting block 2/7 (27% of text processed) — waiting for model response · 0/1 chapters complete · 9s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 2/7 (27% of text processed) — waiting for model response · 0/1 chapters complete · 10s elapsed
+[script] Chapter 1, block 2: 33 label(s) for narration, unknown or repeated spans were ignored.
+[script] Chapter 0: "The Last Question" — Scripting block 3/7 (46% of text processed) — waiting for model response · 0/1 chapters complete · 17s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 3/7 (46% of text processed) — waiting for model response · 0/1 chapters complete · 20s elapsed
+[script] Chapter 1, block 3: 19 label(s) for narration, unknown or repeated spans were ignored.
+[script] Chapter 0: "The Last Question" — Scripting block 4/7 (64% of text processed) — waiting for model response · 0/1 chapters complete · 24s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 4/7 (64% of text processed) — waiting for model response · 0/1 chapters complete · 30s elapsed
+[script] Chapter 1, block 4: 23 label(s) for narration, unknown or repeated spans were ignored.
+[script] Chapter 0: "The Last Question" — Scripting block 5/7 (82% of text processed) — waiting for model response · 0/1 chapters complete · 32s elapsed
+[script] Chapter 1, block 5: 8 quoted span(s) came back without a speaker and go to verification; 14 label(s) for narration, unknown or repeated spans were ignored.
+[script] Chapter 0: "The Last Question" — Scripting block 6/7 (92% of text processed) — waiting for model response · 0/1 chapters complete · 38s elapsed
+[script] Chapter 0: "The Last Question" — Scripting block 6/7 (92% of text processed) — waiting for model response · 0/1 chapters complete · 40s elapsed
+[script] Chapter 1, block 6: 6 label(s) for narration, unknown or repeated spans were ignored.
+[script] Chapter 0: "The Last Question" — Scripting block 7/7 (95% of text processed) — waiting for model response · 0/1 chapters complete · 41s elapsed
+[script] Chapter 1, block 7: 11 label(s) for narration, unknown or repeated spans were ignored.
+[script] Chapter 0: "The Last Question" — Blocks complete. Verifying 41 speaker assignment(s) · 0/1 chapters complete · 45s elapsed
+[script] Chapter 0: "The Last Question" — Blocks complete. Verifying 41 speaker assignment(s) · 0/1 chapters complete · 50s elapsed
+[script] script usage: 8 LLM calls · 21,597 prompt + 7,075 completion tokens · 51s
+
+Error: Speaker verification returned missing, duplicate, or unexpected segment ids. Script was not saved; run the script stage again, and finished blocks are kept.

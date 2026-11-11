@@ -1,0 +1,27 @@
+[
+  {
+    "runId": "script-2026-11-11T15:43:09.231Z",
+    "stage": "script",
+    "startedAt": "2026-11-11T15:43:09.231Z",
+    "wallMs": 53725,
+    "outcome": "completed",
+    "llm": {
+      "calls": 9,
+      "promptTokens": 22407,
+      "completionTokens": 4475,
+      "reasoningTokens": 309
+    },
+    "models": {
+      "minimax/minimax-m3.1-flash": {
+        "calls": 9,
+        "promptTokens": 22407,
+        "completionTokens": 4475,
+        "reasoningTokens": 309
+      }
+    },
+    "tts": {
+      "calls": 0,
+      "characters": 0
+    }
+  }
+]

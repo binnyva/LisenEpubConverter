@@ -1,0 +1,299 @@
+{
+  "version": 3,
+  "stories": [
+    {
+      "id": "book",
+      "title": "The Last Question"
+    }
+  ],
+  "characters": [
+    {
+      "id": "char-188db5cdc3a6f230",
+      "name": "Alexander Adell",
+      "story": "book",
+      "aliases": [
+        "Adell"
+      ],
+      "sex": "male",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 0,
+          "text": "Alexander Adell and Bertram Lupov were two of the faithful attendants of Multivac."
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-cbc985851ccbf045",
+      "name": "Bertram Lupov",
+      "story": "book",
+      "aliases": [
+        "Lupov",
+        "Bert"
+      ],
+      "sex": "male",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 0,
+          "text": "Alexander Adell and Bertram Lupov were two of the faithful attendants of Multivac."
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-48f3a47593a4fdc1",
+      "name": "Jerrodette I",
+      "story": "book",
+      "aliases": [],
+      "sex": "female",
+      "age": "child",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 1,
+          "text": "Jerrodette I said promptly"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-f6b178cd821f7bc3",
+      "name": "Jerrodette II",
+      "story": "book",
+      "aliases": [],
+      "sex": "female",
+      "age": "child",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 1,
+          "text": "Jerrodette II was beginning to cry"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-e13a3e719341e76f",
+      "name": "VJ-23X",
+      "story": "book",
+      "aliases": [],
+      "sex": "male",
+      "age": "200s",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 2,
+          "text": "Both seemed in their early twenties; later VJ-23X says he is two hundred twenty-three."
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-02177cb9cbf06068",
+      "name": "MQ-17J",
+      "story": "book",
+      "aliases": [],
+      "sex": "male",
+      "age": "under 200",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 2,
+          "text": "Both seemed in their early twenties; MQ-17J says, “I'm still under two hundred.”"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-37db71b2992e622f",
+      "name": "Dee Sub Wun",
+      "story": "book",
+      "aliases": [],
+      "sex": "unknown",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 3,
+          "text": "I am Dee Sub Wun."
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-dce31272e1b1bb0c",
+      "name": "Universal AC",
+      "story": "book",
+      "aliases": [],
+      "sex": "unknown",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 3,
+          "text": "The Universal AC interrupted Zee Prime's wandering thoughts."
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-93af16d24f89a3d3",
+      "name": "Unnamed man (chapter 1)",
+      "story": "book",
+      "aliases": [],
+      "sex": "male",
+      "age": "unknown",
+      "named": false,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 3,
+          "text": "Zee Prime knew of only one man whose thoughts had penetrated within sensing distance of Universal AC."
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-998d4e549b458d91",
+      "name": "Cosmic AC",
+      "story": "book",
+      "aliases": [
+        "AC"
+      ],
+      "sex": "unknown",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 4,
+          "text": "The Cosmic AC said,"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-c4fa6cbc13df82bb",
+      "name": "Jerrodd",
+      "story": "book",
+      "aliases": [],
+      "sex": "male",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 0,
+          "text": "“That's X-23,” said Jerrodd confidently."
+        },
+        {
+          "chapter": 0,
+          "chunk": 0,
+          "text": "“How was I to know it would frighten them?” Jerrodd whispered back."
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-c1993421ce65f50b",
+      "name": "Jerrodine",
+      "story": "book",
+      "aliases": [],
+      "sex": "female",
+      "age": "adult, approximate age unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 0,
+          "text": "“Quiet, children,” said Jerrodine sharply."
+        },
+        {
+          "chapter": 0,
+          "chunk": 0,
+          "text": "“Now look what you've done,” whispered Jerrodine."
+        },
+        {
+          "chapter": 0,
+          "chunk": 0,
+          "text": "“Jerrodine said, ‘And now, children, it's time for bed.’”"
+        }
+      ],
+      "issues": []
+    },
+    {
+      "id": "char-210c983b5a549b81",
+      "name": "Zee Prime",
+      "story": "book",
+      "aliases": [],
+      "sex": "male",
+      "age": "unknown",
+      "named": true,
+      "chapters": [
+        0
+      ],
+      "evidence": [
+        {
+          "chapter": 0,
+          "chunk": 0,
+          "text": "“Zee Prime said, ‘On which one?’”"
+        },
+        {
+          "chapter": 0,
+          "chunk": 0,
+          "text": "“I do not wish it to happen even after billions of years.”"
+        }
+      ],
+      "issues": []
+    }
+  ],
+  "unresolved": []
+}

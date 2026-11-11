@@ -1,0 +1,203 @@
+{
+  "version": 2,
+  "narrator": {
+    "voiceProfile": {
+      "presentation": "male",
+      "age": "adult",
+      "tone": [
+        "calm",
+        "measured",
+        "curious",
+        "contemplative",
+        "epic"
+      ],
+      "language": "en",
+      "accent": "General American"
+    },
+    "instructions": "Maintain a steady, clear audiobook narration with a thoughtful and slightly detached sci-fi tone. Let the story's vast timescale come through with a quiet sense of wonder and inevitability. Keep pacing even, avoid melodrama, and treat each repetition of the question with fresh, subtle curiosity. Use minimal vocal variation to preserve the narrative's cool, philosophical atmosphere, while allowing the final twist to land with restrained, quiet impact."
+  },
+  "characters": {
+    "Bertram Lupov": {
+      "voiceProfile": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [
+          "dry",
+          "philosophical",
+          "ruminative"
+        ],
+        "language": "en",
+        "accent": "unspecified"
+      },
+      "instructions": "Lower, gravelly, unhurried; a mid-century American working-technician register. Drop into musing pauses; sound comfortable being skeptical. Let alcohol and fatigue color the edges but keep clarity for serious moments."
+    },
+    "Alexander Adell": {
+      "voiceProfile": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [
+          "witty",
+          "casual",
+          "curious"
+        ],
+        "language": "en",
+        "accent": "unspecified"
+      },
+      "instructions": "Bright, conversational, mid-century American informal; slightly quicker than Lupov. Use wry, playful emphasis; make questions sound eager rather than aggressive."
+    },
+    "MQ-17J": {
+      "voiceProfile": {
+        "presentation": "male",
+        "age": "early twenties (apparent); under two hundred",
+        "tone": [
+          "eager",
+          "analytical",
+          "confident"
+        ],
+        "language": "en",
+        "accent": "unspecified"
+      },
+      "instructions": "Youthful but technical; crisp, quick, confident. Sound like a brilliant junior researcher: polite to authorities, impatient with wasted words. Keep pitch natural male; add a slight upward turn when explaining ideas."
+    },
+    "Jerrodd": {
+      "voiceProfile": {
+        "presentation": "male",
+        "age": "adult",
+        "tone": [
+          "warm",
+          "calm",
+          "authoritative"
+        ],
+        "language": "en",
+        "accent": "unspecified"
+      },
+      "instructions": "Warm adult male with calm authority; a shipmaster and father. Use measured, reassuring rhythm; project steadiness and quiet command. Do not shout."
+    },
+    "VJ-23X": {
+      "voiceProfile": {
+        "presentation": "male",
+        "age": "early twenties (apparent); over two hundred",
+        "tone": [
+          "dry",
+          "skeptical",
+          "knowing"
+        ],
+        "language": "en",
+        "accent": "unspecified"
+      },
+      "instructions": "Smooth, dry, intellectual; youthful timbre under centuries-old weariness. Pause a half-beat before conclusions; favor understatement and a trace of irony."
+    },
+    "Zee Prime": {
+      "voiceProfile": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [
+          "contemplative",
+          "distant",
+          "patient"
+        ],
+        "language": "en",
+        "accent": "unspecified"
+      },
+      "instructions": "Refined, distant, almost ethereal; speak as a being in a vast, empty future. Keep volume soft, tempo slow, with contemplative pauses; convey patient curiosity, not excitement."
+    },
+    "Man (chapter 1)": {
+      "voiceProfile": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [
+          "earnest",
+          "wondering",
+          "urgent"
+        ],
+        "language": "en",
+        "accent": "unspecified"
+      },
+      "instructions": "Archetypal, earnest male voice; no strong regional markers. Render the question as a universal human concern; use sincere wonder and a slow building urgency."
+    },
+    "Jerrodine": {
+      "voiceProfile": {
+        "presentation": "female",
+        "age": "adult",
+        "tone": [
+          "warm",
+          "steady",
+          "intelligent"
+        ],
+        "language": "en",
+        "accent": "unspecified"
+      },
+      "instructions": "Warm adult female, steady and intelligent; maternal without being soft. Use even, clear articulation; carry curiosity and concern in equal measure."
+    },
+    "Universal AC": {
+      "voiceProfile": {
+        "presentation": "neutral",
+        "age": "unknown",
+        "tone": [
+          "serene",
+          "impassive",
+          "vast"
+        ],
+        "language": "en",
+        "accent": "unspecified"
+      },
+      "instructions": "Huge, calm, non-human; even, precise, and famously emotionless. Keep a low, resonant, slightly synthetic serenity; deliver each word as a full measurement. No contractions."
+    },
+    "Dee Sub Wun": {
+      "voiceProfile": {
+        "presentation": "unknown",
+        "age": "unknown",
+        "tone": [
+          "functional",
+          "deferential",
+          "mechanical"
+        ],
+        "language": "en",
+        "accent": "unspecified"
+      },
+      "instructions": "Neutral, functional, subordinate; flat and efficient. Use clipped, computer-assisted rhythm; no emotional color; end statements simply."
+    },
+    "Jerrodette I": {
+      "voiceProfile": {
+        "presentation": "female",
+        "age": "child",
+        "tone": [
+          "bright",
+          "curious",
+          "excited"
+        ],
+        "language": "en",
+        "accent": "unspecified"
+      },
+      "instructions": "Bright young girl; high, light, eager. Speak quickly with excited rises; let wonder drive each phrase, but keep enunciation clear."
+    },
+    "Jerrodette II": {
+      "voiceProfile": {
+        "presentation": "female",
+        "age": "child",
+        "tone": [
+          "sweet",
+          "simple",
+          "shy"
+        ],
+        "language": "en",
+        "accent": "unspecified"
+      },
+      "instructions": "Young, sweet, slightly shy girl; higher and softer than Jerrodette I. Keep phrases short and simple; use gentle lilting inflection."
+    },
+    "the man who had sensed Universal AC (chapter 1)": {
+      "voiceProfile": {
+        "presentation": "male",
+        "age": "unknown",
+        "tone": [
+          "awed",
+          "hushed",
+          "transcendent"
+        ],
+        "language": "en",
+        "accent": "unspecified"
+      },
+      "instructions": "Hushed, awestruck, intimate; a human voice crossing into cosmic scale. Speak slowly in a near-whisper, with trembling wonder on key words."
+    }
+  }
+}

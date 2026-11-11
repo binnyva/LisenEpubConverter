@@ -1,17 +1,16 @@
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WorkDir } from '../src/state.js';
 import { config } from '../src/config.js';
 import { attributionBlocks, filterNarratableSegments, runScript } from '../src/pipeline/script.js';
 import { runVoices } from '../src/pipeline/voices.js';
-import { runStage, type PipelineEvent } from '../src/pipeline/runner.js';
+import { runStage } from '../src/pipeline/runner.js';
 import { isSceneBreak } from '../src/util/text.js';
 import { jsonCall } from '../src/providers/llm/openai.js';
 import { getTTSProvider } from '../src/providers/tts/openai.js';
+import { bookFixture, labelsReply, readScript, removeFixtures } from './helpers.js';
 
 vi.mock('../src/providers/llm/openai.js', () => ({ jsonCall: vi.fn() }));
 vi.mock('../src/providers/tts/openai.js', async (importOriginal) => ({
@@ -23,34 +22,15 @@ vi.mock('node:child_process', () => ({ execFile: Object.assign(vi.fn(), {
 }) }));
 const command = vi.mocked((execFile as any)[promisify.custom]);
 const llm = vi.mocked(jsonCall);
-const roots: string[] = [];
 afterEach(() => {
   vi.resetAllMocks();
-  for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+  removeFixtures();
 });
 
-/** A one-chapter book whose cleaned text carries a "• • •" scene break. */
-function fixture({ fiction = true, cleaned = 'Before the break.\n\n• • •\n\nAfter the break.' } = {}) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lisen-scene-breaks-'));
-  roots.push(root);
-  const epubPath = path.join(root, 'book.epub');
-  fs.writeFileSync(epubPath, 'offline fixture');
-  const work = new WorkDir(epubPath, root);
-  const chapters = [{ index: 0, title: 'One', file: 'chapters/0.md', words: 20 }];
-  work.writeJson('metadata.json', { title: 'Book', author: 'Author', language: 'en', chapters });
-  work.writeJson('analysis.json', {
-    isFiction: fiction, summary: 'Story.', characters: [],
-    author: { name: 'Author', sex: 'unknown', age: 'unknown', country: 'unknown' },
-    chapters: [{ index: 0, narrate: true }],
-  });
-  work.writeJson('characters.json', { version: 1, chapters: [0], characters: [] });
-  work.writeJson('chapter-summaries.json', { 0: 'Two scenes.' });
-  work.dir('chapters');
-  fs.writeFileSync(work.path('chapters/0.md'), cleaned);
-  fs.writeFileSync(work.dir('chapters-clean') + '/00.md', cleaned);
-  for (const stage of ['extract', 'analyze', 'chapters', 'list-characters'] as const) work.markDone(stage);
-  const events: PipelineEvent[] = [];
-  return { work, events, options: { epubPath, workRoot: root, outDir: path.join(root, 'out'), onEvent: (event: PipelineEvent) => events.push(event) } };
+/** A one-chapter book whose text carries a "• • •" scene break. */
+function fixture({ fiction = true, text = 'Before the break.\n\n• • •\n\nAfter the break.' } = {}) {
+  const book = bookFixture({ chapters: [text], profile: fiction ? {} : { isFiction: false, form: 'non-fiction' } });
+  return { work: book.work, events: book.events, options: book.run };
 }
 
 describe('attributionBlocks', () => {
@@ -89,57 +69,30 @@ describe('filterNarratableSegments with pauses', () => {
 });
 
 describe('Script scene breaks', () => {
-  it('turns a fiction scene break into a pause between separately attributed sections', async () => {
-    const { work } = fixture();
-    llm.mockResolvedValueOnce({ segments: [{ speaker: 'narrator', text: 'Before the break.', confidence: 'high' }] });
-    llm.mockResolvedValueOnce({ segments: [{ speaker: 'narrator', text: 'After the break.', confidence: 'high' }] });
+  it('turns a scene break into a pause between separately labelled sections, and never shows the divider', async () => {
+    const { work } = fixture({ text: '"Go," said Ann.\n\n• • •\n\n"Stay," said Ann.' });
+    llm.mockResolvedValue(labelsReply([[1, 'Ann']], { characters: [{ name: 'Ann' }] }) as any);
 
-    await runScript(work);
+    await runScript(work, undefined, () => {});
 
     expect(llm).toHaveBeenCalledTimes(2);
-    expect(work.readJson<any>('script/00.json').segments).toEqual([
-      { speaker: 'narrator', text: 'Before the break.', confidence: 'high' },
-      { speaker: 'narrator', text: '• • •', confidence: 'high', kind: 'pause', pauseMs: config.sceneBreakPauseMs },
-      { speaker: 'narrator', text: 'After the break.', confidence: 'high' },
+    for (const [request] of llm.mock.calls) expect(request.user).not.toContain('•');
+    expect(llm.mock.calls[1][0].user).toContain('[scene break]');
+    expect(readScript(work, 0).segments.map((segment) => [segment.kind ?? 'speech', segment.speaker, segment.text])).toEqual([
+      ['speech', 'Ann', '"Go,"'], ['speech', 'narrator', 'said Ann.'],
+      ['pause', 'narrator', '• • •'],
+      ['speech', 'Ann', '"Stay,"'], ['speech', 'narrator', 'said Ann.'],
     ]);
-    // The model is never shown the divider it must not read out; the second
-    // request still learns that a scene ended.
-    for (const call of llm.mock.calls) expect((call[0] as { user: string }).user).not.toContain('•');
-    expect((llm.mock.calls[1][0] as { user: string }).user).toContain('[scene break]');
+    expect(readScript(work, 0).segments[2].pauseMs).toBe(config.sceneBreakPauseMs);
   });
 
   it('turns a non-fiction scene break into a pause with no model call', async () => {
     const { work } = fixture({ fiction: false });
 
-    await runScript(work);
+    await runScript(work, undefined, () => {});
 
     expect(llm).not.toHaveBeenCalled();
-    expect(work.readJson<any>('script/00.json').segments.map((segment: any) => segment.kind))
-      .toEqual([undefined, 'pause', undefined]);
-  });
-
-  it('restores scene breaks dropped by an earlier Chapters run and saves the repaired text', async () => {
-    const { work } = fixture({ fiction: false, cleaned: 'Before the break.\n\nAfter the break.' });
-    // The extracted chapter still has the divider the old cleanup removed.
-    fs.writeFileSync(work.path('chapters/0.md'), 'Before the break.\n\n• • •\n\nAfter the break.');
-
-    await runScript(work);
-
-    expect(fs.readFileSync(work.path('chapters-clean/00.md'), 'utf8'))
-      .toBe('Before the break.\n\n• • •\n\nAfter the break.');
-    expect(work.readJson<any>('script/00.json').segments[1]).toMatchObject({ kind: 'pause' });
-  });
-
-  it('asks for a rerun when an existing script predates scene breaks', async () => {
-    const { work, options, events } = fixture({ fiction: false });
-    await runScript(work);
-    const script = work.readJson<any>('script/00.json');
-    work.writeJson('script/00.json', { ...script, segments: script.segments.filter((segment: any) => segment.kind !== 'pause') });
-
-    await runStage({ ...options, stage: 'script' });
-
-    expect(events.map((event) => event.message ?? '').join(' ')).toContain('scripted before scene breaks were kept');
-    expect(work.readJson<any>('script/00.json').segments.some((segment: any) => segment.kind === 'pause')).toBe(false);
+    expect(readScript(work, 0).segments.map((segment) => segment.kind ?? 'speech')).toEqual(['speech', 'pause', 'speech']);
   });
 });
 
@@ -149,18 +102,19 @@ describe('Synth and assembly of scene breaks', () => {
     work.writeJson('casting.json', { version: 2, narrator: { voiceProfile: {}, instructions: 'Steady.' }, characters: {} });
     runVoices(work, { provider: 'openai', model: 'gpt-4o-mini-tts' }, path.resolve('library/voices.json'));
     for (const stage of ['script', 'casting', 'voices'] as const) work.markDone(stage);
+    work.dir('3-audio');
     return { work, options, events };
   }
 
   it('records a pause in the chapter manifest without paying for a TTS request', async () => {
     const { work, options } = synthFixture();
-    await runScript(work);
+    await runScript(work, undefined, () => {});
     const synthesize = vi.fn(async () => Buffer.from('audio'));
     vi.mocked(getTTSProvider).mockReturnValue({ maxChars: 4000, synthesize } as any);
 
     await runStage({ ...options, stage: 'synth', rerun: true });
 
-    const { segments } = work.readJson<any>('audio/00-segments.json');
+    const { segments } = work.readJson<any>('3-audio/00-chapter-1.json');
     expect(synthesize).toHaveBeenCalledTimes(2);
     expect(segments).toHaveLength(3);
     expect(segments[1]).toEqual({ pauseMs: config.sceneBreakPauseMs });
@@ -168,8 +122,8 @@ describe('Synth and assembly of scene breaks', () => {
 
   it('encodes silence matching the synthesized audio and concatenates it in place', async () => {
     const { work, options } = synthFixture();
-    work.writeJson('audio/00-segments.json', { index: 0, segments: ['aaa', { pauseMs: 2000 }, 'bbb'] });
-    for (const hash of ['aaa', 'bbb']) fs.writeFileSync(path.join(work.dir('audio-cache'), `${hash}.mp3`), 'paid audio');
+    work.writeJson('3-audio/00-chapter-1.json', { index: 0, segments: ['aaa', { pauseMs: 2000 }, 'bbb'] });
+    for (const hash of ['aaa', 'bbb']) fs.writeFileSync(path.join(work.dir('2-audio-cache'), `${hash}.mp3`), 'paid audio');
     work.markDone('synth');
     let concatList = '';
     command.mockImplementation(async (bin: string, args: string[]) => {
@@ -185,12 +139,12 @@ describe('Synth and assembly of scene breaks', () => {
 
     await runStage({ ...options, stage: 'assemble' });
 
-    const silence = work.path('audio', 'silence-2000ms-24000-1.mp3');
+    const silence = work.path('3-audio', 'silence-2000ms-24000-1.mp3');
     expect(fs.existsSync(silence)).toBe(true);
     expect(concatList.split('\n')).toEqual([
-      `file '${work.path('audio-cache', 'aaa.mp3')}'`,
+      `file '${work.path('2-audio-cache', 'aaa.mp3')}'`,
       `file '${silence}'`,
-      `file '${work.path('audio-cache', 'bbb.mp3')}'`,
+      `file '${work.path('2-audio-cache', 'bbb.mp3')}'`,
     ]);
     const silenceCall = command.mock.calls.find(([, args]: any) => String(args).includes('anullsrc'));
     expect(String(silenceCall?.[1])).toContain('anullsrc=r=24000:cl=mono');
@@ -199,10 +153,10 @@ describe('Synth and assembly of scene breaks', () => {
 
   it('re-encodes a chapter whose manifest gained a pause after the last encode', async () => {
     const { work, options } = synthFixture();
-    fs.writeFileSync(work.path(work.dir('audio') && 'audio/00.m4a'), 'stale encoding');
+    fs.writeFileSync(work.path('3-audio/00-chapter-1.m4a'), 'stale encoding');
     await new Promise((resolve) => setTimeout(resolve, 5));
-    work.writeJson('audio/00-segments.json', { index: 0, segments: ['aaa', { pauseMs: 2000 }] });
-    fs.writeFileSync(path.join(work.dir('audio-cache'), 'aaa.mp3'), 'paid audio');
+    work.writeJson('3-audio/00-chapter-1.json', { index: 0, segments: ['aaa', { pauseMs: 2000 }] });
+    fs.writeFileSync(path.join(work.dir('2-audio-cache'), 'aaa.mp3'), 'paid audio');
     work.markDone('synth');
     command.mockImplementation(async (bin: string, args: string[]) => {
       if (bin === 'ffprobe' && args.includes('stream=sample_rate,channels')) {
@@ -215,7 +169,7 @@ describe('Synth and assembly of scene breaks', () => {
 
     await runStage({ ...options, stage: 'assemble' });
 
-    expect(fs.readFileSync(work.path('audio/00.m4a'), 'utf8')).toBe('encoded audio');
+    expect(fs.readFileSync(work.path('3-audio/00-chapter-1.m4a'), 'utf8')).toBe('encoded audio');
   });
 });
 

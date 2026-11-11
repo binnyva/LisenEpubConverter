@@ -4,8 +4,17 @@ import crypto from 'node:crypto';
 import { STAGES, type Stage } from './config.js';
 import { isRemoteSource, readSource, sourceFormatForPath, type SourceFormat, type SourceMetadataOverrides } from './source/read.js';
 
+/**
+ * Shown wherever a work folder made by an earlier pipeline is opened. Its
+ * files, paid audio included, are left exactly as they are.
+ */
+export const OUTDATED_WORK_FOLDER_MESSAGE =
+  'This work folder was made by an earlier version of the pipeline and cannot be continued. Rebuild it from Extract (convert <source> --force, or run <source> extract --rebuild). Its existing files, including audio already paid for, are left untouched.';
+
+const STATE_VERSION = 3;
+
 export interface WorkState {
-  version: 2;
+  version: 3;
   source: string;
   sourceHash: string;
   sourceFormat: SourceFormat;
@@ -16,14 +25,9 @@ export interface WorkState {
   /** User override for short story collection handling; detection is used when unset. */
   collection?: boolean;
   /** Completion timestamps for stages that can be run a chapter at a time. */
-  chapterCompleted?: Partial<Record<'chapters' | 'script' | 'synth', Record<string, string>>>;
+  chapterCompleted?: Partial<Record<'script' | 'synth', Record<string, string>>>;
   /** Hash of the cast and concrete bindings used by the last completed synthesis. */
   synthesisInputHash?: string;
-}
-
-interface LegacyWorkState extends Omit<WorkState, 'version' | 'source' | 'sourceHash' | 'sourceFormat'> {
-  epub?: string;
-  epubHash?: string;
 }
 
 /**
@@ -34,6 +38,7 @@ export class WorkDir {
   readonly root: string;
   private state: WorkState;
   private readonly currentSourceHash: string;
+  private outdated = false;
 
   constructor(sourcePath: string, workRoot: string, title?: string, existingRoot?: string) {
     const sourceFormat = sourceFormatForPath(sourcePath);
@@ -53,9 +58,17 @@ export class WorkDir {
       .digest('hex')
       .slice(0, 16);
 
+    const fresh = (): WorkState => ({ version: STATE_VERSION, source: sourcePath, sourceHash: this.currentSourceHash, sourceFormat, completed: {}, chapterCompleted: {} });
     const statePath = this.path('state.json');
     if (fs.existsSync(statePath)) {
-      this.state = migrateState(JSON.parse(fs.readFileSync(statePath, 'utf8')) as WorkState | LegacyWorkState, sourcePath, sourceFormat, this.currentSourceHash);
+      const saved = JSON.parse(fs.readFileSync(statePath, 'utf8')) as WorkState;
+      if (saved.version !== STATE_VERSION) {
+        // Nothing here is read or rewritten until Extract is rebuilt.
+        this.outdated = true;
+        this.state = fresh();
+        return;
+      }
+      this.state = { ...saved, chapterCompleted: saved.chapterCompleted ?? {} };
       // URLs are refreshed only by Extract. Avoid a network request whenever a
       // work folder is inspected or a later stage resumes.
       const currentHash = remote && this.state.source === sourcePath ? this.state.sourceHash : this.currentSourceHash;
@@ -72,9 +85,20 @@ export class WorkDir {
         this.save();
       }
     } else {
-      this.state = { version: 2, source: sourcePath, sourceHash: this.currentSourceHash, sourceFormat, completed: {}, chapterCompleted: {} };
+      this.state = fresh();
       this.save();
     }
+  }
+
+  /** True for a folder made by an earlier pipeline; see OUTDATED_WORK_FOLDER_MESSAGE. */
+  isOutdated(): boolean {
+    return this.outdated;
+  }
+
+  /** Start this folder over in the current layout. Only an Extract rebuild does this. */
+  adoptCurrentLayout(): void {
+    this.outdated = false;
+    this.save();
   }
 
   path(...parts: string[]): string {
@@ -115,12 +139,7 @@ export class WorkDir {
     this.save();
   }
 
-  /** @deprecated Use acceptCurrentSource. */
-  acceptCurrentEpub(): void {
-    this.acceptCurrentSource();
-  }
-
-  /** The user's collection override, or undefined when Analyze's detection applies. */
+  /** The user's collection override, or undefined when Metadata's detection applies. */
   collection(): boolean | undefined {
     return this.state.collection;
   }
@@ -148,7 +167,7 @@ export class WorkDir {
     return true;
   }
 
-  completedChapters(stage: 'chapters' | 'script' | 'synth'): number[] {
+  completedChapters(stage: 'script' | 'synth'): number[] {
     return Object.keys(this.state.chapterCompleted?.[stage] ?? {})
       .map(Number)
       .filter(Number.isInteger)
@@ -156,7 +175,7 @@ export class WorkDir {
   }
 
   markChaptersDone(
-    stage: 'chapters' | 'script' | 'synth',
+    stage: 'script' | 'synth',
     indexes: number[],
     allIndexes: number[]
   ): void {
@@ -184,7 +203,7 @@ export class WorkDir {
    * Keep only the listed chapters' completion for a chapter-scoped stage.
    * Partial invalidation uses this so unaffected chapters are not re-run.
    */
-  retainChaptersDone(stage: 'chapters' | 'script' | 'synth', keep: number[], allIndexes: number[]): void {
+  retainChaptersDone(stage: 'script' | 'synth', keep: number[], allIndexes: number[]): void {
     const completed = (this.state.chapterCompleted ??= {});
     const byChapter = completed[stage] ?? {};
     const retained = Object.fromEntries(
@@ -204,7 +223,7 @@ export class WorkDir {
     const start = STAGES.indexOf(stage);
     for (const s of STAGES.slice(start)) {
       delete this.state.completed[s];
-      if (s === 'chapters' || s === 'script' || s === 'synth') {
+      if (s === 'script' || s === 'synth') {
         delete this.state.chapterCompleted?.[s];
       }
     }
@@ -253,6 +272,7 @@ export class WorkDir {
   }
 
   private save(): void {
+    if (this.outdated) throw new Error(OUTDATED_WORK_FOLDER_MESSAGE);
     fs.writeFileSync(this.path('state.json'), JSON.stringify(this.state, null, 2));
   }
 
@@ -316,28 +336,6 @@ function unusedWorkRoot(workRoot: string, title: string): string {
     suffix += 1;
   }
   return candidate;
-}
-
-function migrateState(
-  raw: WorkState | LegacyWorkState,
-  sourcePath: string,
-  sourceFormat: SourceFormat,
-  sourceHash: string
-): WorkState {
-  if ('source' in raw && typeof raw.source === 'string') {
-    return { ...raw, version: 2, sourceFormat: raw.sourceFormat ?? sourceFormat, chapterCompleted: raw.chapterCompleted ?? {} } as WorkState;
-  }
-  const legacy = raw as LegacyWorkState;
-  return {
-    version: 2,
-    source: legacy.epub ?? sourcePath,
-    sourceHash: legacy.epubHash ?? sourceHash,
-    sourceFormat: sourceFormatForPath(legacy.epub ?? '') ?? sourceFormat,
-    completed: legacy.completed ?? {},
-    chapterCompleted: legacy.chapterCompleted ?? {},
-    sourceChanged: legacy.sourceChanged,
-    synthesisInputHash: legacy.synthesisInputHash,
-  };
 }
 
 function compactOverrides(overrides: SourceMetadataOverrides): SourceMetadataOverrides {

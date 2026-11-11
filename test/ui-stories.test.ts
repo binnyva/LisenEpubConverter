@@ -35,16 +35,13 @@ function browser() {
 const book = (overrides: object = {}) => ({
   sourcePath: '/book.epub',
   sourceAvailable: true,
-  metadata: { title: 'Collected Stories', chapters: [] },
-  analysis: { isFiction: true, isCollection: true },
+  metadata: { title: 'Collected Stories', chapters: [], profile: { isFiction: true, form: 'short story collection' } },
   state: { completed: {}, collection: true },
   chapters: [
     { index: 0, title: 'The Sentinel', narrate: true },
     { index: 1, title: 'Rescue Party', narrate: true },
     { index: 2, title: 'Notes', narrate: false },
   ],
-  characterObservations: [],
-  characterCandidates: [],
   ...overrides,
 });
 
@@ -126,8 +123,8 @@ describe('UI story grouping', () => {
     expect(vm.runInContext('storyDraft', context)).toBe(null);
   });
 
-  it('hides the panel until the book has been analyzed', () => {
-    const { nodes, context } = workspace({ analysis: undefined });
+  it('hides the panel until Metadata has profiled the book', () => {
+    const { nodes, context } = workspace({ metadata: { title: 'Collected Stories', chapters: [] } });
     vm.runInContext('renderStories()', context);
     expect(nodes.get('#story-grouping').hidden).toBe(true);
   });
@@ -135,12 +132,12 @@ describe('UI story grouping', () => {
 
 describe('UI story grouping in the character and casting panels', () => {
   const registry = {
-    version: 2,
-    chapters: [0, 1],
+    version: 3,
+    unresolved: [],
     stories: [{ id: 'story-00', title: 'The Sentinel' }, { id: 'story-01', title: 'Rescue Party' }],
     characters: [
-      { id: 'a', name: 'John (The Sentinel)', story: 'story-00', aliases: [], sex: 'male', age: '40s', country: 'unknown', chapters: [0], evidence: [], issues: [] },
-      { id: 'b', name: 'John (Rescue Party)', story: 'story-01', aliases: [], sex: 'female', age: 'child', country: 'unknown', chapters: [1], evidence: [], issues: [] },
+      { id: 'a', name: 'John (The Sentinel)', story: 'story-00', aliases: [], sex: 'male', age: '40s', named: true, chapters: [0], evidence: [], issues: [] },
+      { id: 'b', name: 'John (Rescue Party)', story: 'story-01', aliases: [], sex: 'female', age: 'child', named: true, chapters: [1], evidence: [], issues: [] },
     ],
   };
   const stories = { version: 1, collection: true, stories: [
@@ -150,7 +147,7 @@ describe('UI story grouping in the character and casting panels', () => {
 
   it('groups the character list under its story headings', () => {
     const { nodes, context } = workspace({
-      stories, characterRegistry: registry, state: { completed: { 'list-characters': 'now' }, collection: true },
+      stories, characterRegistry: registry, state: { completed: { script: 'now' }, collection: true },
     });
     vm.runInContext('renderCharacters()', context);
 
@@ -162,7 +159,7 @@ describe('UI story grouping in the character and casting panels', () => {
 
   it('keeps the narrator first and groups cast rows by story, including a speaker in none', () => {
     const { nodes, context } = workspace({
-      stories, characterRegistry: registry, state: { completed: { 'list-characters': 'now' }, collection: true },
+      stories, characterRegistry: registry, state: { completed: { script: 'now' }, collection: true },
       casting: {
         version: 2,
         narrator: { voiceProfile: { presentation: 'male', age: 'unknown', tone: [] }, instructions: 'Narrate.' },

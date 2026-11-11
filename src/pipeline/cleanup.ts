@@ -1,4 +1,4 @@
-import { isSceneBreak, paragraphsOf } from '../util/text.js';
+import { paragraphsOf } from '../util/text.js';
 
 export interface CleanupEdit {
   find: string;
@@ -44,6 +44,21 @@ function findPattern(find: string): RegExp {
   );
 }
 
+/** Why an edit is refused whatever text it is applied to, or undefined when it is acceptable. */
+function refusal({ find, replace }: CleanupEdit): string | undefined {
+  if (!find.trim()) return 'empty quotation';
+  if (find.length > MAX_FIND_CHARS) return 'quotes too much text for one correction';
+  if (find.length - replace.length > MAX_REMOVED_CHARS) return 'would remove too much text';
+  if (replace.length - find.length > MAX_ADDED_CHARS) return 'would add too much text';
+  return undefined;
+}
+
+/** A bare footnote number also matches every real number that looks the same. */
+const isRepeatedBareNumber = (find: string, matches: number): boolean =>
+  matches > 1 && /\p{N}/u.test(find) && !/\p{L}/u.test(find);
+
+const REPEATED_NUMBER = 'a number that occurs more than once; it needs a neighbouring word';
+
 /**
  * Apply a model's cleanup edits to the source text. The text itself is never
  * regenerated, so the model cannot paraphrase, drop, or reorder prose: an edit
@@ -51,29 +66,44 @@ function findPattern(find: string): RegExp {
  * correction can, is skipped and reported instead of applied.
  */
 export function applyCleanupEdits(source: string, edits: CleanupEdit[]): CleanupResult {
-  let text = source;
+  const result = applySpanEdits([source], edits);
+  return { text: result.texts[0], applied: result.applied, skipped: result.skipped };
+}
+
+export interface SpanEditResult {
+  texts: string[];
+  applied: number;
+  skipped: CleanupResult['skipped'];
+}
+
+/**
+ * Apply cleanup edits to a passage held as separate spans. An edit is applied
+ * inside each span it quotes, under the same guards as applyCleanupEdits; one
+ * whose quotation only exists across two spans is skipped, because narration
+ * and speech are different segments and an edit cannot straddle them.
+ */
+export function applySpanEdits(spans: string[], edits: CleanupEdit[]): SpanEditResult {
+  let texts = [...spans];
   let applied = 0;
   const skipped: CleanupResult['skipped'] = [];
-  for (const { find, replace } of edits) {
-    const skip = (reason: string): void => { skipped.push({ find, reason }); };
-    if (!find.trim()) { skip('empty quotation'); continue; }
-    if (find === replace) continue;
-    if (find.length > MAX_FIND_CHARS) { skip('quotes too much text for one correction'); continue; }
-    if (find.length - replace.length > MAX_REMOVED_CHARS) { skip('would remove too much text'); continue; }
-    if (replace.length - find.length > MAX_ADDED_CHARS) { skip('would add too much text'); continue; }
+  for (const edit of edits) {
+    const { find, replace } = edit;
+    if (find === replace && find.trim()) continue;
+    const reason = refusal(edit);
+    if (reason) { skipped.push({ find, reason }); continue; }
 
     const pattern = findPattern(find);
-    const matches = text.match(pattern)?.length ?? 0;
-    if (!matches) { skip('not found in the text'); continue; }
-    // A bare footnote number also matches every real number that looks the same.
-    if (matches > 1 && /\p{N}/u.test(find) && !/\p{L}/u.test(find)) {
-      skip('a number that occurs more than once; it needs a neighbouring word');
+    const matches = texts.reduce((sum, text) => sum + (text.match(pattern)?.length ?? 0), 0);
+    if (!matches) {
+      const crosses = texts.length > 1 && pattern.test(texts.join(' '));
+      skipped.push({ find, reason: crosses ? 'crosses a span boundary' : 'not found in the text' });
       continue;
     }
-    text = text.replace(pattern, () => replace);
+    if (isRepeatedBareNumber(find, matches)) { skipped.push({ find, reason: REPEATED_NUMBER }); continue; }
+    texts = texts.map((text) => text.replace(pattern, () => replace));
     applied += 1;
   }
-  return { text, applied, skipped };
+  return { texts, applied, skipped };
 }
 
 /**
@@ -83,73 +113,4 @@ export function applyCleanupEdits(source: string, edits: CleanupEdit[]): Cleanup
  */
 export function dropEmptyParagraphs(text: string): string {
   return paragraphsOf(text).join('\n\n');
-}
-
-/** Letters and digits only, so a small cleanup edit does not move an anchor. */
-function signature(text: string): string {
-  return text.replace(/[^\p{L}\p{N}]+/gu, ' ').trim().toLowerCase();
-}
-
-const ANCHOR_CHARS = 60;
-
-/** The one cleaned paragraph that matches an anchor, or -1 when it is ambiguous. */
-function soleMatch(signatures: string[], anchor: string, at: 'start' | 'end'): number {
-  const matches = signatures
-    .map((candidate, position) => ({ candidate, position }))
-    .filter(({ candidate }) => (at === 'start' ? candidate.startsWith(anchor) : candidate.endsWith(anchor)));
-  return matches.length === 1 ? matches[0].position : -1;
-}
-
-/**
- * Put scene breaks back into a chapter that was cleaned before they were kept,
- * without paying to clean it again. Each divider is anchored on the paragraph
- * before it, or on the one after it when the divider opens the chapter; an
- * anchor that no longer matches exactly one cleaned paragraph is reported
- * instead of guessed at, since a misplaced pause is worse than a missing one.
- */
-export function restoreSceneBreaks(raw: string, cleaned: string): { text: string; restored: number; missed: number } {
-  const rawParagraphs = paragraphsOf(raw);
-  const cleanedParagraphs = paragraphsOf(cleaned);
-  // A chapter cleaned after this change already carries every divider.
-  if (!rawParagraphs.some(isSceneBreak) || cleanedParagraphs.some(isSceneBreak)) {
-    return { text: cleaned, restored: 0, missed: 0 };
-  }
-
-  const signatures = cleanedParagraphs.map(signature);
-  // Dividers to insert before the cleaned paragraph at each position.
-  const before = new Map<number, string[]>();
-  let missed = 0;
-  for (const [index, paragraph] of rawParagraphs.entries()) {
-    if (!isSceneBreak(paragraph)) continue;
-
-    const previous = rawParagraphs.slice(0, index).reverse().find((candidate) => !isSceneBreak(candidate));
-    const next = rawParagraphs.slice(index + 1).find((candidate) => !isSceneBreak(candidate));
-    let position = -1;
-    if (previous) {
-      const anchor = signature(previous);
-      const found = soleMatch(signatures, anchor.slice(0, ANCHOR_CHARS), 'start');
-      position = found === -1 ? soleMatch(signatures, anchor.slice(-ANCHOR_CHARS), 'end') : found;
-      if (position !== -1) position += 1;
-    }
-    if (position === -1 && next) {
-      position = soleMatch(signatures, signature(next).slice(0, ANCHOR_CHARS), 'start');
-    }
-    if (position === -1) {
-      missed += 1;
-      continue;
-    }
-    before.set(position, [...(before.get(position) ?? []), paragraph]);
-  }
-
-  const restored: string[] = [];
-  for (const [position, paragraph] of cleanedParagraphs.entries()) {
-    restored.push(...(before.get(position) ?? []));
-    restored.push(paragraph);
-  }
-  restored.push(...(before.get(cleanedParagraphs.length) ?? []));
-  return {
-    text: restored.join('\n\n'),
-    restored: [...before.values()].reduce((sum, dividers) => sum + dividers.length, 0),
-    missed,
-  };
 }
