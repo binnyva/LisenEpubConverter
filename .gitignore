@@ -5,3 +5,5 @@ work/
 .env
 0Meta/
 .DS_Store
+benchmarks/legacy/
+benchmarks/runs/
