@@ -9,9 +9,18 @@ import { reportWarning } from '../util/warnings.js';
 import { countWords } from '../util/text.js';
 import { buildStories, writeStories } from './stories.js';
 
-/** Titles of matter that is never narrated. */
+/**
+ * Titles of matter that is never narrated. Each entry is a whole word, so
+ * stems carry their own endings ("acknowledg" alone would never match
+ * "Acknowledgments": the trailing \b needs a boundary after the "g").
+ */
 const SKIP_TITLE_RE =
-  /\b(contents|table of contents|acknowledg|thanks|appendix|index|copyright|license|colophon|dedication|about the author|also by|praise for|title page|other books|project gutenberg)\b/i;
+  /\b(contents|table of contents|acknowledge?ments?|thanks|appendix|appendices|index|indexes|indices|copyright|license|colophon|dedications?|about the author|also by|praise for|title page|other books|project gutenberg)\b/i;
+
+/** Whether a chapter title names matter that is never narrated. */
+export function isSkipTitle(title: string): boolean {
+  return SKIP_TITLE_RE.test(title);
+}
 
 /** Titles that are not the book's own prose, so not a fair sample of it. */
 const FRONT_MATTER_RE =
@@ -26,7 +35,7 @@ function firstWords(text: string, count: number): string {
 /** The first chapter that reads like the book itself rather than its front matter. */
 export function firstBodyChapter(chapters: ExtractedChapter[]): ExtractedChapter | undefined {
   const candidates = chapters.filter((chapter) => !chapter.isNav);
-  return candidates.find((chapter) => chapter.words >= MIN_BODY_WORDS && !SKIP_TITLE_RE.test(chapter.title) && !FRONT_MATTER_RE.test(chapter.title))
+  return candidates.find((chapter) => chapter.words >= MIN_BODY_WORDS && !isSkipTitle(chapter.title) && !FRONT_MATTER_RE.test(chapter.title))
     // Every title looked like front matter: the longest document is the safest sample.
     ?? [...candidates].sort((left, right) => right.words - left.words)[0];
 }
@@ -132,7 +141,7 @@ export async function runMetadata(work: WorkDir): Promise<BookProfile> {
     const title = proposed?.title.trim() || chapter.title;
     const plan = proposed ? { ...proposed, title } : { index: chapter.index, title, narrate: true, reason: 'default' };
     if (chapter.isNav) return { ...plan, narrate: false, reason: 'nav/TOC document' };
-    if (SKIP_TITLE_RE.test(chapter.title)) return { ...plan, narrate: false, reason: `title matches skip list: "${chapter.title}"` };
+    if (isSkipTitle(chapter.title)) return { ...plan, narrate: false, reason: `title matches skip list: "${chapter.title}"` };
     if (chapter.words < 10) return { ...plan, narrate: false, reason: 'empty chapter' };
     // Rescue false skips: a title like "Chapter XII" is story content no matter
     // what the model decided.

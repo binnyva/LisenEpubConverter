@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { doubleQuoteDensity, firstBodyChapter, settleDialogueStyle } from '../src/pipeline/metadata.js';
+import { doubleQuoteDensity, firstBodyChapter, isSkipTitle, settleDialogueStyle } from '../src/pipeline/metadata.js';
 import type { BookMetadata, ExtractedChapter, Stories } from '../src/types.js';
 
 const cleanups: Array<() => void> = [];
@@ -191,6 +191,15 @@ describe('Metadata response', () => {
 
 describe('Metadata helpers', () => {
   const chapter = (index: number, title: string, wordCount: number, isNav = false) => ({ index, title, words: wordCount, isNav }) as ExtractedChapter;
+
+  it('skips back matter by title, whole words and their plurals included', () => {
+    for (const title of ['Acknowledgments', 'Acknowledgements', 'Acknowledgment', 'Contents', 'Table of Contents', 'Index', 'Indexes', 'Appendix', 'Appendices', 'Copyright', 'Dedication', 'Thanks', 'About the Author', 'Also by Ted Chiang']) {
+      expect(isSkipTitle(title), title).toBe(true);
+    }
+    for (const title of ['Chapter One', 'Story of Your Life', 'Thanksgiving', 'The Indexer', 'Understand', 'Hell Is the Absence of God']) {
+      expect(isSkipTitle(title), title).toBe(false);
+    }
+  });
 
   it('picks the first chapter that does not look like front matter', () => {
     const chapters = [chapter(0, 'Cover', 2), chapter(1, 'Contents', 80, true), chapter(2, 'Introduction by the Editor', 3000), chapter(3, 'Dedication', 400), chapter(4, 'Prologue', 900), chapter(5, 'Chapter One', 4000)];
